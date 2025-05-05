@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firestarter_ui"
+version = "0.1.0"
+authors = [
+  { name="AI Assistant", email="assist@example.com" },
+]
+description = "A TKinter UI for the Firestarter EPROM programmer library."
+# readme = "README.md" # Optional: Add a README file
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License", # Assuming MIT, change if needed
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: MacOS X",
+    "Environment :: X11 Applications",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Desktop Environment",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+dependencies = [
+    "firestarter>=1.4.6"
+]
+
+[project.scripts]
+firestarter-ui = "firestarter_ui.main_app:main"
