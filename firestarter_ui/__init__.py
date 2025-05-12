@@ -1,2 +1,3 @@
 # Init file for the firestarter_ui package
-# Place holder for version
+
+__version__ = "0.1.0"
