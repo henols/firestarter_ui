@@ -6,9 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "firestarter_ui"
 version = "0.1.0"
 authors = [
-  { name="AI Assistant", email="assist@example.com" },
+  { name="Henrik Olsson", email="henols@gmail.com" },
 ]
-description = "A TKinter UI for the Firestarter EPROM programmer library."
+description = "UI for the Firestarter EPROM programmer library."
 # readme = "README.md" # Optional: Add a README file
 requires-python = ">=3.8"
 classifiers = [
@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: System :: Hardware :: Hardware Drivers",
 ]
 dependencies = [
-    "firestarter>=1.4.6"
+    "firestarter>=1.5.3"
 ]
 
 [project.scripts]

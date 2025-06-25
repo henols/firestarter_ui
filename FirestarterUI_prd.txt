@@ -1,0 +1,1707 @@
+﻿j Firestarter UI - Product Requirements Document
+Version: 1.6 Date: May 5, 2025 Author: Anna Botten
+
+
+j Firestarter UI - Product Requirements Document        1
+1. Introduction        3
+1.1 Purpose        3
+1.2 Goals        3
+1.3 Scope        3
+2. User Roles & Personas        5
+3. Functional Requirements        6
+3.1 UI Layout & Core Components        6
+3.2 Operation Execution        9
+4. Non-Functional Requirements        10
+5. UI Design & Wireframes (Conceptual)        11
+5.1 ASCII Art Wireframes        11
+6. Future Considerations        13
+7. Appendix A        14
+8. Appendix B        21
+Firestarter Project - Function Documentation        21
+Table of Contents        21
+1. Main Application Logic (firestarter/main.py)        22
+Class EpromCompleter(BaseCompleter)        22
+Module Functions        23
+2. Configuration Management (firestarter/config.py)        24
+Class ConfigManager        24
+Module Functions        26
+3. EPROM Database (firestarter/database.py)        26
+Class EpromDatabase        26
+Module Functions        29
+4. EPROM Operations (firestarter/eprom_operations.py)        29
+Class EpromOperator        29
+Module Functions        34
+Custom Exception        34
+5. Hardware Management (firestarter/hardware.py)        34
+Class HardwareManager        35
+Custom Exception        36
+6. Firmware Management (firestarter/firmware.py)        36
+Class FirmwareManager        37
+Custom Exception        39
+7. EPROM Information Presentation (firestarter/eprom_info.py)        39
+Class EpromConsolePresenter        39
+Module Functions        41
+8. Serial Communication (firestarter/serial_comm.py)        41
+Class SerialCommunicator        41
+Custom Exceptions        45
+9. EPROM Specification Builder (firestarter/ic_layout.py)        45
+Class EpromSpecBuilder        45
+10. AVR Tool Wrapper (firestarter/avr_tool.py)        48
+Class Avrdude        48
+Custom Exceptions        50
+11. Utility Functions (firestarter/utils.py)        50
+
+
+________________
+1. Introduction
+1.1 Purpose
+This document outlines the requirements for a Python-based desktop User Interface (UI) using the TKinter framework. This UI will serve as a front-end by importing and utilizing the Firestarter Python library version 1.4.x (from https://github.com/henols/firestarter_app), specifically providing a graphical interface to key operations (e.g., from firestarter/eprom_operations.py). The goal is to provide an accessible and user-friendly graphical interface for users interacting with EPROMs via the Firestarter library, eliminating the need for direct CLI usage or manual Python scripting.
+1.2 Goals
+* Provide an intuitive graphical interface for core Firestarter EPROM operations by calling library functions directly.
+* Allow users to easily configure function arguments through UI elements (input fields, checkboxes, etc.) for implemented operations.
+* Clearly display status messages, results, and logs generated during operations.
+* Simplify the process of selecting the target hardware device (programmer) and the EPROM chip type using Firestarter's library functions.
+* Encapsulate common EPROM programming workflows within a dedicated application.
+* Provide a complete menu structure representing all available Firestarter operations, with placeholders for those not yet fully implemented.
+1.3 Scope
+* In Scope:
+   * UI built with Python and TKinter.
+   * Directly calling the following functions (or equivalents) from the Firestarter 1.4.x library: read, write, verify, erase, check_chip_id, blank_check.
+   * A standard Application Menu Bar (File, Eprom, Operations, Programmer, Help) providing access to all Firestarter functionalities, with placeholders for non-implemented operations.
+   * Toolbar buttons for frequently used implemented operations (can be hidden from a menu option).
+   * A dedicated panel for configuring arguments (all arguments must be pressent) for the selected implemented library function call, including selection of the EPROM chip type.
+   * Mechanisms to search for/detect programmer devices and select one.
+   * Mechanisms to configure and calibrate the programmer (configure, read vpp and read vcc).
+   * Mechanisms to search/list and select EPROM chip types supported by the library.
+   * A text console area to display application status messages, logs, and results returned by the library functions.
+   * Basic input validation for required function arguments for implemented operations.
+   * Use of pop-up dialogs for critical errors and file browsing.
+* Out of Scope:
+   * Full implementation of advanced or less common Firestarter library functions beyond the initially specified list (read, write, etc.) in this version (though menu placeholders will exist).
+   * Complex scripting or automation capabilities beyond single operations.
+   * User authentication or profiles.
+   * Modifying the underlying Firestarter library.
+   * Support for Firestarter library versions outside the 1.4.x branch.
+________________
+2. User Roles & Personas
+* Primary User: Hardware Engineer / Technician / Hobbyist - Needs to program, read, and verify EPROMs frequently using the Firestarter library but prefers a graphical interface.
+________________
+3. Functional Requirements
+3.1 UI Layout & Core Components
+* FR-001: Main Window: The application shall present a single main window using TKinter.
+* FR-001.A: Application Menu Bar: A standard menu bar shall be present at the top of the main window with the following structure:
+   * File:
+      * Open Configuration... (Future consideration? Specify behavior)
+      * Save Configuration... (Future consideration? Specify behavior)
+________________
+      *       * Verbose Logging (Checkbutton menu item to toggle detailed logging in console)
+      * Preferences... (Opens a new dialog - Specify preferences, e.g., default paths)
+________________
+      *       * Exit
+   * Eproms:
+      * Search (Implemented)
+      * Info  (Displays all info about an EPROM, characteristics and pin layout)(Disabled/Placeholder) (Future consideration? Specify behavior)
+   * Operations:
+      * Read EPROM (Implemented)
+      * Write EPROM (Implemented)
+      * Verify EPROM (Implemented)
+      * Erase EPROM (Implemented)
+      * Check Chip ID (Implemented)
+      * Blank Check (Implemented)
+      * --- (Separator)
+      * [Placeholder: Advanced Op 1 Name] (Disabled/Placeholder)
+      * [Placeholder: Advanced Op 2 Name] (Disabled/Placeholder)
+      * [Placeholder: Other Firestarter Op Name] (Disabled/Placeholder)
+      * (Add placeholders for all other relevant operations available in Firestarter library, marked as not implemented)
+   * Programmer:
+      * Detect Devices (Triggers FR-004.A: Scan for programmer hardware)
+      * Select Device: (Submenu populated by FR-004.A results, allowing selection)
+________________
+      *       * Update Programmer Firmware...
+      * About Programmer... (Displays hardware info if available - Placeholder/Disabled)
+   * Help:
+      * About Firestarter UI... (Displays application info, version, credits)
+      * View Documentation... (Link to Firestarter docs or app help)
+* FR-002: Operation Selection: The primary way to initiate actions is via the "Operations" menu (FR-001.A). Menu items for non-implemented operations shall be disabled or trigger a "Not Yet Implemented" message. Optional: Corresponding toolbar buttons below the menu bar can provide quick access only to the implemented operations.
+* FR-003: Operation Options Panel: When an implemented operation menu item (or toolbar button) is selected, a dedicated panel shall appear (suggested location: lower-left) displaying the relevant configuration options (function arguments) for that specific Firestarter library function, requiring the selected EPROM Type (from FR-004) to be valid for the operation. Selecting a non-implemented operation should not show this panel or should show a placeholder message.
+   * This panel will contain appropriate TKinter widgets (e.g., Entry for text/paths/numbers, Checkbutton for boolean flags, Combobox for predefined choices) corresponding to the function arguments.
+   * Widgets per Implemented Function Call (based on Firestarter 1.4.x API):
+      * read(address, length, output_file):
+         * Address (Hex): Entry (validate as hex)
+         * Length (Bytes): Entry (validate as integer)
+         * Output File: Entry + "Browse..." Button (FR-008)
+      * write(input_file, verify_after_write=True, address=None, chip_type=?):
+         * Input File: Entry + "Browse..." Button (FR-008)
+         * Verify After Write: Checkbutton (defaults to checked/True)
+         * Address/Offset (Hex, Optional): Entry (validate as hex)
+         * Requires selected Chip Type.
+      * verify(input_file, address=None, chip_type=?):
+         * Input File: Entry + "Browse..." Button (FR-008)
+         * Address/Offset (Hex, Optional): Entry (validate as hex)
+         * Requires selected Chip Type.
+      * erase(chip_type=?):
+         * Requires selected Chip Type.
+         * Confirm any other arguments needed for 1.4.x.
+      * check_chip_id(chip_type=?):
+         * Requires selected Chip Type.
+         * Confirm any other arguments needed for 1.4.x.
+      * blank_check(chip_type=?):
+         * Requires selected Chip Type.
+         * Confirm any other arguments needed for 1.4.x.
+* FR-004: EPROM Type Search/Selection:
+   * A mechanism to list/search supported EPROM chip types shall be provided (suggested location: below hardware device status area). An Entry field to filter the out EPROM’s.
+   * If more then 1 EPROM is found a pop-up with a search box and list shall be displayed where its possible to refine the seach.
+   * The user must select an EPROM Type from this list/combobox. The selected type must be stored and made available as an argument to relevant operations (FR-003). The currently selected EPROM Type should be clearly visible.
+* FR-004.A: Hardware Device Detection: The "Hardware > Detect Devices" menu item shall trigger the relevant hardware programmer discovery function within the Firestarter library (maybe not implemented).
+* FR-005: Hardware Device Selection: Results from the device detection (FR-004.A) shall populate the "Hardware > Select Device" submenu.
+   * The submenu items shall display identifying information for each device (e.g., Port Name, Device Description).
+   * The user must select a hardware device from this submenu before operations requiring hardware interaction can be executed. The selected device (port name, device object) must be stored for use in function calls. The currently selected device should be clearly indicated in the UI (e.g., in a status bar or dedicated label).
+* FR-006: Output Console: A prominent text area (Text widget with a Scrollbar) shall occupy a significant portion of the UI (suggested location: right side or bottom) to display:
+   * Application status messages (e.g., "Detecting devices...", "Executing read operation...").
+   * Log messages (controlled by File > Verbose Logging).
+   * Results and status information returned by the Firestarter library functions for implemented operations.
+   * Formatted data read from the EPROM (if applicable).
+* FR-007: Execute Button: A clear "Run" or "Execute" button shall be present within or near the Operation Options Panel (FR-003). This button triggers the selected implemented Firestarter library function call with the configured arguments (including selected EPROM type from FR-004) and selected hardware device object/port (from FR-005). It shall be disabled if required inputs (e.g., selected device, selected EPROM type, required file paths) are missing or invalid, or if a non-implemented operation is selected.
+* FR-008: File Selection: For operations requiring file input/output, a "Browse..." button next to the relevant file path Entry field shall open a native file dialog (tkinter.filedialog.askopenfilename or tkinter.filedialog.asksaveasfilename).
+3.2 Operation Execution
+* FR-009: Function Call Preparation: Selecting an implemented operation and clicking "Execute" shall gather the arguments from the UI widgets in the Operation Options Panel (FR-003), retrieve the selected EPROM Type (FR-004), and retrieve the selected target hardware device object/identifier (FR-005).
+* FR-010: Direct Function Execution: The application shall call the corresponding Python function directly from the imported Firestarter 1.4.x library for implemented operations, passing the prepared arguments (including EPROM type) and device identifier.
+* FR-011: Handling Return Values & Logging:
+   * Status messages indicating the start and end of implemented operations shall be logged to the Output Console (FR-006).
+   * Return values from the library functions (e.g., success/failure status, data read, verification results) shall be processed and displayed appropriately in the Output Console or dedicated UI elements if needed.
+   * Any logging information provided by the Firestarter library itself should ideally be captured and displayed in the console (requires library support for logging handlers).
+* FR-012: UI Responsiveness: The UI must remain responsive during potentially long-running Firestarter library function calls. Execution must happen in a separate thread (e.g., using Python's threading module) to avoid freezing the TKinter main loop. Mechanisms to update the UI (console, status bar) from the worker thread must be implemented safely (e.g., using thread-safe queues or root.after()).
+* FR-013: Error Reporting:
+   * Standard exceptions raised by the Firestarter library functions during execution (e.g., DeviceNotFoundError, VerificationError, FileNotFoundError, PermissionError, UnsupportedChipError) shall be caught by the UI application.
+   * Caught exceptions shall trigger a descriptive pop-up error message dialog (tkinter.messagebox.showerror) and potentially log detailed traceback information to the Output Console (especially if Verbose Logging is enabled).
+   * Errors detected before execution (e.g., invalid numeric input, required EPROM type not selected, required device not selected) should prevent the execution and provide immediate feedback (e.g., highlighting the field, using a status bar message, or a pop-up).
+   * Selecting a non-implemented operation from the menu should result in a disabled menu item or a simple pop-up message (tkinter.messagebox.showinfo) stating "This feature is not yet implemented."
+________________
+4. Non-Functional Requirements
+* NFR-001: Platform: The application must run on operating systems where Python, TKinter, and the Firestarter library are supported (primarily Windows, macOS, Linux).
+* NFR-002: Usability: The interface should be intuitive for users familiar with EPROM programming concepts. Clear labels, logical workflow via menus and panels. Tooltips for options are recommended. Disabled items clearly indicate non-implemented features.
+* NFR-003: Performance: UI responsiveness is key (FR-012). The overhead of the UI wrapper itself should be minimal. Library function performance is external but handled via threading.
+* NFR-004: Dependencies: The application requires Python 3.x, TKinter (usually included), and the Firestarter Python library version 1.4.x will be installed with help of the pyproject.toml or in the dev environment from requirements.txt.
+* NFR-005: Maintainability: Code should be well-structured (e.g., using classes for UI frames/components, separating UI logic from Firestarter interaction logic), commented, and ideally follow PEP 8 guidelines. The structure should facilitate adding implementations for the placeholder operations later.
+________________
+5. UI Design & Wireframes (Conceptual)
+(This section provides a textual description and ASCII art wireframes.)
+
+
+* Layout: Single-page application feel within the main window. Standard Menu Bar at the top, Toolbar below. Area for selecting Hardware Device and EPROM Type. Main content area split between Operation Options Panel (dynamic) and Output Console. Status Bar at the bottom.
+5.1 ASCII Art Wireframes
+Initial State / No Operation Selected:
+
+
++--------------------------------------------------------------------------+
+| Firestarter UI                                        [ ] [O] [X]        |
++--------------------------------------------------------------------------+
+| File  Eproms  Operations  Hardware  Help                                 |
++==========================================================================+
+| [Icon] [Icon] [Icon] [Icon] [Icon] [Icon]                                |
++--------------------------------------------------------------------------+
+| Selected Device: [None - Use Hardware Menu]                              |
+| EPROM Type:      [None]                   Search:  [___________] [Icon]  |
++--------------------------------+-----------------------------------------+
+| Options Panel (Lower Left)     | Output Console (Lower Right)            |
+| +----------------------------+ | +-------------------------------------+ |
+| |                            | | |                                     | |
+| | (Select an implemented     | | |                                     | |
+| |  operation from the menu   | | |                                     | |
+| |  to see options here)      | | |                                     | |
+| |                            | | |                                     | |
+| |                            | | |                                     | |
+| |                            | | |                                     | |
+| |                            | | |                                     | |
+| |                            | | |                                     | |
+| |                            | | |                                     | |
+| | [    Execute Button    ]   | | |                                     | |
+| | (Initially Disabled)       | | |                                     | |
+| +----------------------------+ | +-------------------------------------+ |
++--------------------------------+-----------------------------------------+
+| Status Bar: Ready | Device: None | EPROM: None                           |
++--------------------------------------------------------------------------+
+
+
+________________
+
+
+"Write EPROM" Operation Selected:
+
+
++----------------------------------------------------------------------------+
+| Firestarter UI                                          [ ] [O] [X]        |
++----------------------------------------------------------------------------+
+| File  Eproms  Operations  Hardware  Help                                   |
++============================================================================+
+| [Icon] [Icon] [Icon] [Icon] [Icon] [Icon]                                  |
++----------------------------------------------------------------------------+
+| Selected Device: [COM3 - CH340 Programmer]                                 |
+| EPROM Type:      [AT28C256  ]               Search:  [___________] [Icon]  |
++----------------------------------+-----------------------------------------+
+| Write EPROM Options (Lower Left) | Output Console (Lower Right)            |
+| +------------------------------+ | +-------------------------------------+ |
+| | EPROM: AT28C256              | | | Detecting devices...                | |
+| | Input File:   [________]     | | | Device selected: COM3               | |
+| |               [ Browse ]     | | | EPROM Type selected: AT28C256       | |
+| | Address (Hex):[________]     | | | Ready for Write operation...        | |
+| |               (Optional)     | | |                                     | |
+| | [X] Verify After Write       | | |                                     | |
+| |                              | | |                                     | |
+| |                              | | |                                     | |
+| |                              | | |                                     | |
+| |                              | | |                                     | |
+| | [       Run Write      ]     | | |                                     | |
+| |                              | | |                                     | |
+| +------------------------------+ | +-------------------------------------+ |
++----------------------------------+-----------------------------------------+
+| Status Bar: Ready | Device: COM3 | EPROM: AT28C256                         |
++----------------------------------------------------------------------------+
+________________
+6. Future Considerations
+* Implementing the placeholder operations in the menu.
+* Implementing "Open/Save Configuration".
+* Implementing "Preferences" dialog.
+* Implementing "Update Programmer Firmware" and "About Programmer" (requires library support).
+* Adding a progress bar for long operations (requires library feedback).
+* Packaging the application as a standalone executable (using PyInstaller or similar).
+
+
+
+
+________________
+
+
+7. Appendix A
+The Firestarter CLI is a versatile tool for interacting with EPROM programmers, allowing you to read, write, verify, and manage EPROMs, as well as control and update the programmer firmware itself. Let's dive into the commands, their arguments, and the underlying modules and functions that power them.
+Initial Setup
+When you run Firestarter, it first performs a couple of initial actions:
+* Configuration Loading: firestarter.config.open_config() is called to load any existing user configurations from ~/.firestarter/config.json.
+* Database Initialization: firestarter.database.init_db() is called to load the EPROM definitions from built-in and local database files (database_generated.json, database_overrides.json, ~/.firestarter/database.json, and pin maps). This database is used for EPROM information and autocompletion.
+* Signal Handling: A signal handler (exit_gracefully) is set up to catch Ctrl+C (SIGINT) for a cleaner exit.
+* Python Version Check: Ensures you are running Python 3.9 or higher.
+* Shell Autocompletion: If configured, argcomplete is used to provide command and argument autocompletion in your shell.
+Global Options
+These options can be used with any Firestarter command:
+* -v, --verbose:
+   * Description: Enables verbose mode, providing detailed debug output, including internal states and raw communication with the programmer.
+   * Function: Sets the logging level to DEBUG.
+* --version:
+   * Description: Shows the current version of the Firestarter application and exits.
+   * Function: Prints the version defined in firestarter.__init__.__version__.
+Understanding Flags
+Many commands use a flags argument that is passed to the EPROM programmer. The main.py script has a helper function build_arg_flags(args) that constructs this integer value based on command-line arguments. This function internally calls firestarter.eprom_operations.build_flags(). The resulting flags can include:
+* FLAG_SKIP_ERASE, FLAG_SKIP_BLANK_CHECK: Set if an operation should skip erasing or blank checking (e.g., via --ignore-blank-check).
+* FLAG_FORCE: Set if an operation should be forced despite potential mismatches or warnings (e.g., via -f or --force).
+* FLAG_VPE_AS_VPP: Set if the VPE (Voltage Programming Enable) should be used as VPP (Voltage Programming Pin) (e.g., via --vpe-as-vpp).
+* FLAG_OUTPUT_ENABLE (0x20): Typically set by default for most operations, indicating the EPROM's Output Enable (OE) pin should be active (low). Can be overridden by specific dev commands.
+* FLAG_CHIP_ENABLE (0x40): Typically set by default for most operations, indicating the EPROM's Chip Enable (CE) pin should be active (low). Can be overridden by specific dev commands.
+These flags are defined in firestarter.constants.
+________________
+
+
+EPROM Operation Commands
+These commands interact directly with an EPROM chip via the programmer. Most ofthem require an <eprom> argument, which is the name of the EPROM chip as defined in the Firestarter database. Autocompletion for EPROM names is available.
+1. read <eprom> [output_file] [options]
+   * Description: Reads the content from a specified EPROM.
+   * Arguments:
+      * eprom (positional, string): The name of the EPROM (e.g., "AT28C256"). Autocompleted.
+      * output_file (positional, optional, string): Name of the file to save the EPROM content. Defaults to <EPROM_NAME>.bin.
+      * -f, --force (optional, boolean): Force the read operation, even if the chip ID doesn't match the expected ID for the specified EPROM.
+      * -a, --address (optional, string): Specifies the starting address for the read operation (e.g., "0x100" or "256").
+      * -s, --size (optional, string): Specifies the number of bytes to read (e.g., "0x1000" or "4096").
+   * Module: firestarter.eprom_operations
+   * Function: read(eprom_name, output_file, flags, address, size)
+   * Details: This function commands the programmer to read data from the EPROM. It handles setting up the communication, transferring data, and saving it to the specified output file. Progress is shown with a progress bar.
+2. write <eprom> <input_file> [options]
+   * Description: Writes a binary file to a specified EPROM.
+   * Arguments:
+      * eprom (positional, string): The name of the EPROM. Autocompleted.
+      * input_file (positional, string): Path to the binary file to be written to the EPROM.
+      * -b, --ignore-blank-check (optional, boolean): If set, skips the pre-write blank check and any associated automatic erase cycle.
+      * -f, --force (optional, boolean): Force the write operation, even if VPP voltage seems incorrect or the chip ID doesn't match.
+      * -a, --address (optional, string): Specifies the starting address for the write operation.
+      * --vpe-as-vpp (optional, boolean): Instructs the programmer to use the VPE (Voltage Programming Enable) line as the VPP (programming voltage) line. Useful for certain EPROMs or programmer hardware modifications.
+   * Module: firestarter.eprom_operations
+   * Function: write(eprom_name, input_file, flags, address)
+   * Details: This function sends the data from the input_file to the programmer to be written onto the EPROM. It typically involves erasing (if applicable and not skipped), blank checking (if not skipped), and then programming the EPROM byte by byte. Progress is shown.
+3. verify <eprom> <input_file> [options]
+   * Description: Verifies the content of an EPROM against a binary file.
+   * Arguments:
+      * eprom (positional, string): The name of the EPROM. Autocompleted.
+      * input_file (positional, string): Path to the binary file to compare against the EPROM's content.
+      * -a, --address (optional, string): Specifies the starting address for verification.
+      * -f, --force (optional, boolean): Force verification, even if VPP or chip ID doesn't match.
+   * Module: firestarter.eprom_operations
+   * Function: verify(eprom_name, input_file, flags, address)
+   * Details: This command reads the EPROM content and compares it byte-by-byte with the input_file. It reports any discrepancies. Progress is shown.
+4. erase <eprom> [options]
+   * Description: Erases an EPROM, if the EPROM type supports electrical erasure.
+   * Arguments:
+      * eprom (positional, string): The name of the EPROM. Autocompleted.
+      * -f, --force (optional, boolean): Force the erase operation, even if VPP or chip ID doesn't match.
+      * -b, --blank-check (optional, boolean, default: skips blank check): If this flag is provided, it signals that a blank check should be performed (by not setting FLAG_SKIP_BLANK_CHECK). By default (if -b is not used), FLAG_SKIP_BLANK_CHECK is set. The firmware might use this flag to perform an internal blank check after erasing.
+   * Module: firestarter.eprom_operations
+   * Function: erase(eprom_name, flags)
+   * Details: Sends an erase command to the programmer for the specified EPROM. The success and method of erasure depend on the EPROM type and programmer capabilities.
+5. blank <eprom> [options] (maps to blank_check)
+   * Description: Checks if a specified EPROM is blank (all bytes are typically 0xFF or 0x00, depending on the EPROM).
+   * Arguments:
+      * eprom (positional, string): The name of the EPROM. Autocompleted.
+      * -f, --force (optional, boolean): Force the blank check, even if VPP or chip ID doesn't match.
+   * Module: firestarter.eprom_operations
+   * Function: blank_check(eprom_name, flags)
+   * Details: Instructs the programmer to read the EPROM and verify if it's in a blank state.
+6. id <eprom> [options] (maps to check_chip_id)
+   * Description: Attempts to read the electronic signature or chip ID from an EPROM, if supported.
+   * Arguments:
+      * eprom (positional, string): The name of the EPROM. Autocompleted.
+      * -f, --force (optional, boolean): Force the ID check, even if the VPP is not correct for the specified EPROM (use with caution).
+   * Module: firestarter.eprom_operations
+   * Function: check_chip_id(eprom_name, flags)
+   * Details: Commands the programmer to execute the chip ID reading sequence. If an ID is read, it's displayed. If the ID is found in the database, matching EPROMs are listed.
+________________
+
+
+EPROM Information Commands
+These commands provide information from the EPROM database.
+7. list [options]
+   * Description: Lists EPROMs available in the Firestarter database.
+   * Arguments:
+      * -v, --verified (optional, boolean): If set, only lists EPROMs that are marked as "verified" in the database.
+   * Module: firestarter.eprom_info
+   * Function: list_eproms(verified)
+   * Details: Displays a formatted table of EPROMs, including their name, manufacturer, pin count, chip ID (if available), type, and VPP.
+8. info <eprom> [options]
+   * Description: Displays detailed information about a specific EPROM from the database.
+   * Arguments:
+      * eprom (positional, string): The name of the EPROM. Autocompleted.
+      * -c, --config (optional, boolean): If set, shows the EPROM's configuration in a JSON format suitable for export or for understanding the data sent to the programmer.
+   * Module: firestarter.eprom_info
+   * Function: eprom_info(eprom_name, export)
+   * Details: Prints various details like manufacturer, pin count, memory size, type, voltages, pulse delay, and a visual pinout diagram with jumper settings for common programmer shields. If --config is used, it also prints the raw configuration data and pin map data.
+9. search <text>
+   * Description: Searches for EPROMs in the database by name or other properties.
+   * Arguments:
+      * text (positional, string): The text to search for within EPROM names or properties.
+   * Module: firestarter.eprom_info
+   * Function: search_eproms(query)
+   * Details: Lists all EPROMs that match the search query, using the same formatted table as the list command.
+________________
+
+
+Hardware and Firmware Commands
+These commands interact with the programmer's hardware and firmware, rather than an EPROM chip directly.
+10. vpp [options]
+   * Description: Reads the current VPP (programming voltage) level from the programmer.
+   * Arguments:
+      * -t, --timeout (optional, integer, hidden from help): Timeout for the reading operation.
+   * Module: firestarter.hardware
+   * Function: read_vpp(timeout)
+   * Details: Useful for diagnostics to check if the programmer is generating the correct VPP. Some programmers might allow continuous reading if a timeout is specified.
+11. vpe [options]
+   * Description: Reads the current VPE (voltage programming enable, often VCC or a logic high) level from the programmer.
+   * Arguments:
+      * -t, --timeout (optional, integer, hidden from help): Timeout for the reading operation.
+   * Module: firestarter.hardware
+   * Function: read_vpe(timeout)
+   * Details: Similar to vpp, but for the VPE voltage.
+12. fw [options]
+   * Description: Manages the firmware on the Firestarter programmer. It can check the current version and install new firmware.
+   * Arguments:
+      * -i, --install (optional, boolean): If set, attempts to download and install the latest firmware for the specified board.
+      * -b, --board (optional, string, default: "uno"): Specifies the microcontroller board type of the programmer. Choices: "uno", "leonardo". (Note: The code has "leoanardo", which is likely a typo for "leonardo").
+      * -p, --avrdude-path (optional, string): Full path to the avrdude executable. Necessary if avrdude is not in your system's PATH.
+      * -c, --avrdude-config-path (optional, string): Full path to the avrdude.conf configuration file. May be needed for older avrdude versions or custom setups.
+      * --port (optional, string): Specifies the serial port of the programmer. If not provided, Firestarter will attempt to auto-detect it.
+      * -f, --force (optional, boolean): Forces firmware installation even if the current version is reported as up-to-date or the same.
+   * Module: firestarter.firmware
+   * Function: firmware(install, avrdude_path, avrdude_config_path, port, board, force)
+   * Details: Without --install, it checks the current firmware version on the programmer and compares it to the latest available on GitHub. If --install is used, it downloads the appropriate .hex file and uses avrdude to flash it to the programmer.
+13. hw
+   * Description: Reads and displays the hardware revision of the connected programmer.
+   * Arguments: None.
+   * Module: firestarter.hardware
+   * Function: hardware()
+   * Details: Communicates with the programmer to retrieve its hardware version string.
+14. config [options]
+   * Description: Reads or modifies the hardware configuration of the programmer, such as resistor values for voltage dividers (used for VPP/VPE sensing). This is an advanced command.
+   * Arguments:
+      * --rev (optional, float): Overrides the hardware revision detection. Use 0, 1, 2 for specific revisions, or -1 to disable override. Warning: Use with caution, only if you have made hardware modifications.
+      * -r1, --r16 (optional, integer): Sets the value (in Ohms) for resistor R16 (or equivalent) used in the VPE voltage sensing circuit.
+      * -r2, --r14r15 (optional, integer): Sets the value (in Ohms) for resistors R14/R15 (or equivalent) used in the VPP voltage sensing circuit.
+   * Module: firestarter.hardware
+   * Function: config(rev, r1, r2)
+   * Details: Allows querying the current configuration or setting new values. These settings affect how the programmer firmware interprets analog readings for VPP and VPE.
+________________
+
+
+Development and Debugging Commands
+The dev command group provides lower-level access for development and debugging purposes.
+15. dev <subcommand> [options]
+   * Description: Access to development and debugging tools.
+   * Subcommand: read <eprom> [options]
+      * Description: Reads content from an EPROM and prints the data directly to the console as a hexdump.
+      * Arguments:
+         * eprom (positional, string): The name of the EPROM. Autocompleted.
+         * -a, --address (optional, string): Read start address (dec/hex).
+         * -s, --size (optional, string): Size of the data to read (dec/hex). Defaults to 256 bytes if not specified.
+         * -f, --force (optional, boolean): Force read, even if the chip ID doesn't match.
+      * Module: firestarter.eprom_operations
+      * Function: dev_read(eprom_name, address, size, flags)
+   * Subcommand: reg <msb> <lsb> <ctrl> [options]
+      * Description: Allows direct manipulation of the programmer's internal address and control registers.
+      * Arguments:
+         * msb (positional, string): Most Significant Byte of the address (dec/hex).
+         * lsb (positional, string): Least Significant Byte of the address (dec/hex).
+         * ctrl (positional, string): Control register value (dec/hex).
+         * -i, --input-enable (optional, boolean): If set, deactivates Output Enable (OE pin high). Default is OE active (low).
+         * -d, --chip-disable (optional, boolean): If set, deactivates Chip Enable (CE pin high). Default is CE active (low).
+      * Module: firestarter.dev_tools
+      * Function: dev_registers(msb, lsb, ctrl_reg, flags)
+      * Details: The flags argument will include FLAG_OUTPUT_ENABLE and FLAG_CHIP_ENABLE by default. Using --input-enable prevents FLAG_OUTPUT_ENABLE from being set. Using --chip-disable prevents FLAG_CHIP_ENABLE from being set.
+   * Subcommand: addr <eprom> <address> [options]
+      * Description: Sets the address lines on the programmer based on an EPROM's pin map and a given address.
+      * Arguments:
+         * eprom (positional, string): The name of the EPROM whose pin map will be used. Autocompleted.
+         * address (positional, string): The address to set (dec/hex).
+         * -i, --input-enable (optional, boolean): Deactivates Output Enable (OE pin high).
+         * -d, --chip-disable (optional, boolean): Deactivates Chip Enable (CE pin high).
+      * Module: firestarter.dev_tools
+      * Function: dev_address(eprom_name, address, flags)
+      * Details: Similar to dev reg regarding OE/CE flags. This command uses the EPROM's pin mapping to translate the logical address to the correct signals on the programmer's bus.
+This covers the main commands and functionalities of the Firestarter CLI, providing a powerful interface for working with EPROMs and the programmer hardware. Remember to use --help with any command or subcommand to see its specific options.
+8. Appendix B
+Firestarter Project - Function Documentation
+This document outlines the functions and methods within the Python classes and key modules used by the Firestarter application, particularly those called or depended upon by main.py.
+Table of Contents
+1. Main Application Logic (firestarter/main.py)
+2. Configuration Management (firestarter/config.py)
+   * Class ConfigManager
+   * Module Functions
+3. EPROM Database (firestarter/database.py)
+   * Class EpromDatabase
+   * Module Functions
+4. EPROM Operations (firestarter/eprom_operations.py)
+   * Class EpromOperator
+   * Module Functions
+   * Custom Exception
+5. Hardware Management (firestarter/hardware.py)
+   * Class HardwareManager
+   * Custom Exception
+6. Firmware Management (firestarter/firmware.py)
+   * Class FirmwareManager
+   * Custom Exception
+7. EPROM Information Presentation (firestarter/eprom_info.py)
+   * Class EpromConsolePresenter
+   * Module Functions
+8. Serial Communication (firestarter/serial_comm.py)
+   * Class SerialCommunicator
+   * Custom Exceptions
+9. EPROM Specification Builder (firestarter/ic_layout.py)
+   * Class EpromSpecBuilder
+10. AVR Tool Wrapper (firestarter/avr_tool.py)
+   * Class Avrdude
+   * Custom Exceptions
+11. Utility Functions (firestarter/utils.py)
+
+
+________________
+
+
+1. Main Application Logic (firestarter/main.py)
+This module contains the main command-line interface logic, argument parsing, and orchestration of operations.
+Class EpromCompleter(BaseCompleter)
+Provides command-line completion for EPROM names.
+
+
+* __init__(self)
+
+
+   * Description: Initializes the completer by loading the list of allowed EPROM names from the database.
+   * Parameters: None.
+   * Returns: None.
+
+
+* __call__(self, prefix, **kwargs)
+
+
+   * Description: Called by argcomplete to get a list of possible completions for an EPROM name.
+   * Parameters:
+      * prefix (str): The prefix string typed by the user.
+      * **kwargs: Additional keyword arguments from argcomplete.
+   * Returns: list[str] - A list of EPROM names that match the prefix.
+Module Functions
+* allowed_eproms() -> list[str]
+
+
+   * Description: Retrieves a list of all EPROM names from the database.
+   * Parameters: None.
+   * Returns: list[str] - A list of EPROM names.
+
+
+* eprom_validator(eprom: str, prefix: str) -> bool
+
+
+   * Description: Validates if an EPROM name starts with a given prefix (case-insensitive). Used by argcomplete.
+   * Parameters:
+      * eprom (str): The EPROM name to validate.
+      * prefix (str): The prefix to check against.
+   * Returns: bool - True if the EPROM name starts with the prefix, False otherwise.
+
+
+* add_eprom_completer(parser: argparse.ArgumentParser)
+
+
+   * Description: Adds the EpromCompleter to an argparse argument.
+   * Parameters:
+      * parser (argparse.ArgumentParser): The argument parser or subparser to which the EPROM argument with completer will be added.
+   * Returns: None.
+
+
+* create_read_args(parser), create_write_args(parser), create_verify_args(parser), create_blank_check_args(parser), create_erase_parser(parser), create_id_args(parser), create_voltage_args(parser), create_firnware_args(parser) (sic, likely create_firmware_args), create_info_args(parser), create_list_args(parser), create_search_args(parser), create_config_args(parser), create_dev_args(parser), create_oe_ce_args(parser)
+
+
+   * Description: These functions set up the command-line arguments for various subcommands using argparse.
+   * Parameters:
+      * parser (argparse._SubParsersAction): The subparsers action object to add new parsers to.
+   * Returns: None.
+
+
+* build_arg_flags(args: argparse.Namespace) -> int
+
+
+   * Description: Constructs an integer representing combined operation flags based on parsed command-line arguments.
+   * Parameters:
+      * args (argparse.Namespace): The parsed command-line arguments.
+   * Returns: int - The combined flags value.
+
+
+* main() -> int
+
+
+   * Description: The main entry point of the application. Parses arguments, initializes components, and dispatches to the appropriate command handler.
+   * Parameters: None.
+   * Returns: int - Exit code (0 for success, 1 for error).
+
+
+* exit_gracefully(signum, frame)
+
+
+   * Description: Signal handler for graceful exit on SIGINT (Ctrl+C).
+   * Parameters:
+      * signum: Signal number.
+      * frame: Current stack frame.
+   * Returns: None. Exits the program.
+
+
+________________
+
+
+2. Configuration Management (firestarter/config.py)
+Manages application configuration settings.
+Class ConfigManager
+Handles loading, saving, and accessing configuration values from a JSON file. Implemented as a singleton.
+
+
+* __init__(self)
+
+
+   * Description: Initializes the ConfigManager. If already initialized, it does nothing. Loads configuration from file.
+   * Parameters: None.
+   * Returns: None.
+
+
+* _load_config(self)
+
+
+   * Description: Loads configuration from config.json. If the file doesn't exist or is invalid, an empty configuration is used.
+   * Parameters: None.
+   * Returns: None.
+
+
+* _save_config(self)
+
+
+   * Description: Saves the current configuration to config.json. Ensures the configuration directory exists.
+   * Parameters: None.
+   * Returns: None.
+
+
+* get_value(self, key: str, default=None)
+
+
+   * Description: Retrieves a value from the configuration.
+   * Parameters:
+      * key (str): The configuration key.
+      * default: The value to return if the key is not found.
+   * Returns: The value associated with the key, or the default value.
+
+
+* set_value(self, key: str, value)
+
+
+   * Description: Sets a value in the configuration and saves it. If value is None, the key is removed.
+   * Parameters:
+      * key (str): The configuration key.
+      * value: The value to set.
+   * Returns: None.
+
+
+* remove_key(self, key: str)
+
+
+   * Description: Removes a key from the configuration and saves it.
+   * Parameters:
+      * key (str): The configuration key to remove.
+   * Returns: None.
+
+
+* list_all(self) -> dict
+
+
+   * Description: Returns a copy of all configuration key-value pairs.
+   * Parameters: None.
+   * Returns: dict - The current configuration.
+Module Functions
+* get_local_database() -> dict | None
+
+
+   * Description: Loads the local user EPROM database override file (database.json).
+   * Parameters: None.
+   * Returns: dict or None - Parsed JSON data or None if not found/invalid.
+
+
+* get_local_pin_maps() -> dict | None
+
+
+   * Description: Loads the local user pin map override file (pin-maps.json).
+   * Parameters: None.
+   * Returns: dict or None - Parsed JSON data or None if not found/invalid.
+
+
+________________
+
+
+3. EPROM Database (firestarter/database.py)
+Manages EPROM definitions and pin map configurations.
+Class EpromDatabase
+Loads, merges, and provides access to EPROM data. Implemented as a singleton.
+
+
+* __new__(cls, *args, **kwargs)
+
+
+   * Description: Ensures only one instance of EpromDatabase is created (singleton pattern).
+   * Parameters: Standard __new__ parameters.
+   * Returns: The EpromDatabase instance.
+
+
+* __init__(self)
+
+
+   * Description: Initializes the database by loading EPROM and pin map data if not already initialized.
+   * Parameters: None.
+   * Returns: None.
+
+
+* _initialize_database_core(self)
+
+
+   * Description: Loads base and override EPROM definitions and pin maps, then merges them.
+   * Parameters: None.
+   * Returns: None.
+
+
+* _merge_databases(self, db: dict, manual_db: dict) -> dict
+
+
+   * Description: Merges two EPROM database dictionaries, with manual_db taking precedence.
+   * Parameters:
+      * db (dict): The base database.
+      * manual_db (dict): The override database.
+   * Returns: dict - The merged database.
+
+
+* _merge_pin_maps(self, pin_maps_base: dict, manual_pin_map: dict) -> dict
+
+
+   * Description: Merges two pin map configuration dictionaries, with manual_pin_map taking precedence.
+   * Parameters:
+      * pin_maps_base (dict): The base pin maps.
+      * manual_pin_map (dict): The override pin maps.
+   * Returns: dict - The merged pin maps.
+
+
+* get_pin_map(self, pins: int, pin_map_id: str) -> dict | None
+
+
+   * Description: Retrieves a specific pin map configuration.
+   * Parameters:
+      * pins (int): The pin count of the EPROM.
+      * pin_map_id (str): The identifier of the pin map.
+   * Returns: dict or None - The pin map data or None if not found.
+
+
+* get_bus_config(self, pins: int, variant: str) -> dict | None
+
+
+   * Description: Generates the RURP hardware-specific bus configuration from a generic pin map.
+   * Parameters:
+      * pins (int): The pin count of the EPROM.
+      * variant (str): The pin map variant/ID.
+   * Returns: dict or None - The bus configuration or None if not found/applicable.
+
+
+* _map_data(self, ic: dict, manufacturer: str) -> dict
+
+
+   * Description: Transforms raw EPROM data from JSON into a processed dictionary format for application use.
+   * Parameters:
+      * ic (dict): Raw EPROM data for a single IC.
+      * manufacturer (str): The manufacturer of the IC.
+   * Returns: dict - Processed EPROM data.
+
+
+* get_eproms(self, verified: bool | None = None) -> list[dict]
+
+
+   * Description: Retrieves a list of all EPROMs.
+   * Parameters:
+      * verified (bool, optional): If True, only verified EPROMs. If False, only unverified. If None, all.
+   * Returns: list[dict] - A list of EPROM data dictionaries.
+
+
+* get_eprom_config(self, chip_name: str) -> tuple[dict | None, str | None]
+
+
+   * Description: Retrieves the raw configuration data and manufacturer for a specific EPROM by name.
+   * Parameters:
+      * chip_name (str): The name of the EPROM.
+   * Returns: tuple[dict | None, str | None] - (config_dict, manufacturer_str) or (None, None).
+
+
+* get_eprom(self, chip_name: str, full: bool = False) -> dict | None
+
+
+   * Description: Retrieves processed data for a specific EPROM.
+   * Parameters:
+      * chip_name (str): The name of the EPROM.
+      * full (bool): If True, returns all processed data; otherwise, a concise set.
+   * Returns: dict or None - Processed EPROM data or None if not found.
+
+
+* search_eprom(self, chip_name_query: str, include_unverified: bool = True) -> list[dict]
+
+
+   * Description: Searches for EPROMs by name.
+   * Parameters:
+      * chip_name_query (str): The text to search for in EPROM names.
+      * include_unverified (bool): If True, includes unverified EPROMs in results.
+   * Returns: list[dict] - A list of matching EPROM data dictionaries.
+
+
+* search_chip_id(self, chip_id_val: int) -> list[dict]
+
+
+   * Description: Searches for EPROMs by their chip ID.
+   * Parameters:
+      * chip_id_val (int): The decimal chip ID value.
+   * Returns: list[dict] - A list of raw EPROM config dictionaries (with 'manufacturer' added) matching the chip ID.
+Module Functions
+* _read_config_file(filename: str) -> dict
+   * Description: Helper function to read a JSON configuration file from the 'data' subdirectory of the module.
+   * Parameters:
+      * filename (str): The name of the JSON file.
+   * Returns: dict - Parsed JSON data, or an empty dict on error.
+
+
+________________
+
+
+4. EPROM Operations (firestarter/eprom_operations.py)
+Handles various operations on EPROMs like reading, writing, and verifying.
+Class EpromOperator
+Orchestrates EPROM operations using SerialCommunicator and EpromDatabase.
+
+
+* __init__(self, db: EpromDatabase)
+
+
+   * Description: Initializes the EPROM operator.
+   * Parameters:
+      * db (EpromDatabase): An instance of the EPROM database.
+   * Returns: None.
+
+
+* _calculate_buffer_size(self) -> int
+
+
+   * Description: Calculates the appropriate buffer size for serial communication based on the connected programmer type.
+   * Parameters: None.
+   * Returns: int - The buffer size (e.g., LEONARDO_BUFFER_SIZE or BUFFER_SIZE).
+
+
+* _setup_operation(self, eprom_name: str, eprom_data_dict: dict, cmd: int, operation_flags: int = 0, address_str: str | None = None, size_str: str | None = None) -> tuple[dict | None, int]
+
+
+   * Description: Prepares for an EPROM operation by setting up the command dictionary, combining flags, parsing address/size, and establishing a serial connection.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM (for logging).
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * cmd (int): The command code for the operation.
+      * operation_flags (int): Flags specific to this operation.
+      * address_str (str | None): Optional start address string (hex or dec).
+      * size_str (str | None): Optional size string (hex or dec), used for read operations.
+   * Returns: tuple[dict | None, int] - (command_eprom_data, buffer_size) on success, or (None, 0) on failure.
+
+
+* _disconnect_programmer(self)
+
+
+   * Description: Disconnects from the serial programmer if connected.
+   * Parameters: None.
+   * Returns: None.
+
+
+* _perform_simple_command(self, eprom_name: str, eprom_data_dict: dict, cmd: int, operation_flags: int = 0, success_log_msg: str = "") -> bool
+
+
+   * Description: Executes a simple command on the programmer that expects an "OK" response without further data exchange (e.g., erase, blank check).
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * cmd (int): The command code.
+      * operation_flags (int): Operation-specific flags.
+      * success_log_msg (str): Custom message to log on success.
+   * Returns: bool - True on success, False on failure.
+
+
+* _read_data_from_programmer(self, buffer_size: int) -> bytes | None
+
+
+   * Description: Reads a block of data from the programmer after a "DATA:" signal. This method is part of the read loop protocol.
+   * Parameters:
+      * buffer_size (int): The number of bytes to attempt to read (typically the programmer's chunk size).
+   * Returns: bytes | None - The data chunk read, or None if the programmer signals end-of-data ("OK:"). Raises EpromOperationError on programmer error.
+
+
+* _send_file_to_programmer(self, eprom_data_for_command: dict, input_file_path: str, buffer_size: int) -> bool
+
+
+   * Description: Sends the content of a file to the programmer in chunks for write or verify operations.
+   * Parameters:
+      * eprom_data_for_command (dict): EPROM data used for the command setup.
+      * input_file_path (str): Path to the binary file to send.
+      * buffer_size (int): Size of data chunks to send.
+   * Returns: bool - True if the entire file is sent and acknowledged successfully, False otherwise.
+
+
+* read_eprom(self, eprom_name: str, eprom_data_dict: dict, output_file: str | None = None, operation_flags: int = 0, address_str: str | None = None, size_str: str | None = None) -> bool
+
+
+   * Description: Reads data from the EPROM and saves it to a file.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * output_file (str | None): Optional path to save the data. Defaults to EPROM_NAME.bin.
+      * operation_flags (int): Flags for the operation.
+      * address_str (str | None): Optional start address.
+      * size_str (str | None): Optional size to read.
+   * Returns: bool - True on success, False on failure.
+
+
+* dev_set_registers(self, msb_str: str, lsb_str: str, ctrl_reg_str: str, firestarter: bool = False, flags: int = 0) -> bool
+
+
+   * Description: (Developer command) Directly sets the programmer's shift registers (MSB, LSB, Control).
+   * Parameters:
+      * msb_str (str): MSB value (hex or dec).
+      * lsb_str (str): LSB value (hex or dec).
+      * ctrl_reg_str (str): Control register value (hex or dec).
+      * firestarter (bool): If True, use Firestarter-specific control register mapping.
+      * flags (int): Operation flags.
+   * Returns: bool - True on success, False on failure.
+
+
+* dev_set_address_mode(self, eprom_name: str, eprom_data_dict: dict, address_str: str, flags: int = 0) -> bool
+
+
+   * Description: (Developer command) Sets the programmer to hold a specific address on the EPROM using its pin map.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * address_str (str): Address to set (hex or dec).
+      * flags (int): Operation flags.
+   * Returns: bool - True on success, False on failure.
+
+
+* write_eprom(self, eprom_name: str, eprom_data_dict: dict, input_file_path: str, operation_flags: int = 0, address_str: str | None = None) -> bool
+
+
+   * Description: Writes data from a file to the EPROM.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * input_file_path (str): Path to the binary file to write.
+      * operation_flags (int): Flags for the operation.
+      * address_str (str | None): Optional start address.
+   * Returns: bool - True on success, False on failure.
+
+
+* verify_eprom(self, eprom_name: str, eprom_data_dict: dict, input_file_path: str, operation_flags: int = 0, address_str: str | None = None) -> bool
+
+
+   * Description: Verifies the EPROM content against a local file.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * input_file_path (str): Path to the binary file to verify against.
+      * operation_flags (int): Flags for the operation.
+      * address_str (str | None): Optional start address.
+   * Returns: bool - True if verification passes, False otherwise.
+
+
+* erase_eprom(self, eprom_name: str, eprom_data_dict: dict, operation_flags: int = 0) -> bool
+
+
+   * Description: Erases the EPROM (if supported by the chip and programmer).
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * operation_flags (int): Flags for the operation.
+   * Returns: bool - True on success, False on failure.
+
+
+* check_eprom_blank(self, eprom_name: str, eprom_data_dict: dict, operation_flags: int = 0) -> bool
+
+
+   * Description: Checks if the EPROM is blank.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * operation_flags (int): Flags for the operation.
+   * Returns: bool - True if blank, False otherwise.
+
+
+* check_eprom_id(self, eprom_name: str, eprom_data_dict: dict, operation_flags: int = 0) -> bool
+
+
+   * Description: Checks the chip ID of the EPROM. If the ID doesn't match the expected one, it attempts to find the reported ID in the database and display information about it.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data for the expected chip.
+      * operation_flags (int): Flags for the operation.
+   * Returns: bool - True if the chip ID matches the expected ID (or if FLAG_FORCE is set), False otherwise.
+
+
+* dev_read_eprom(self, eprom_name: str, eprom_data_dict: dict, address_str: str | None = None, size_str: str = "256", operation_flags: int = 0) -> bool
+
+
+   * Description: (Developer command) Reads data from the EPROM and prints it to the console as a hexdump.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_data_dict (dict): Pre-fetched EPROM data.
+      * address_str (str | None): Optional start address.
+      * size_str (str): Size of data to read (defaults to "256").
+      * operation_flags (int): Flags for the operation.
+   * Returns: bool - True on success, False on failure.
+Module Functions
+* build_flags(ignore_blank_check: bool = False, force: bool = False, vpe_as_vpp: bool = False) -> int
+
+
+   * Description: Constructs an integer representing combined operation flags.
+   * Parameters:
+      * ignore_blank_check (bool): If True, sets flags to skip erase and blank check.
+      * force (bool): If True, sets the force flag.
+      * vpe_as_vpp (bool): If True, sets flag to use VPE as VPP.
+   * Returns: int - The combined flags value.
+
+
+* hexdump(address: int, data: bytes, width: int = 16)
+
+
+   * Description: Prints a hexdump of the given data, similar to xxd.
+   * Parameters:
+      * address (int): The starting address for the dump.
+      * data (bytes): The data to dump.
+      * width (int): Number of bytes per line.
+   * Returns: None.
+Custom Exception
+* EpromOperationError(Exception)
+   * Description: Custom exception for EPROM operation failures.
+
+
+________________
+
+
+5. Hardware Management (firestarter/hardware.py)
+Manages non-EPROM specific interactions with the programmer hardware.
+Class HardwareManager
+Handles operations like reading hardware revision and voltages.
+
+
+* __init__(self)
+
+
+   * Description: Initializes the HardwareManager.
+   * Parameters: None.
+   * Returns: None.
+
+
+* _execute_simple_command(self, command_dict: dict, operation_name: str) -> tuple[bool, str | None]
+
+
+   * Description: Connects to the programmer, sends a command, expects an "OK" response (where the message part of "OK" is the actual result), and disconnects.
+   * Parameters:
+      * command_dict (dict): The command to send.
+      * operation_name (str): A descriptive name for the operation (for logging).
+   * Returns: tuple[bool, str | None] - (success_status, message_from_programmer).
+
+
+* get_hardware_revision(self) -> bool
+
+
+   * Description: Reads and logs the hardware revision of the programmer.
+   * Parameters: None.
+   * Returns: bool - True if successful, False otherwise.
+
+
+* set_hardware_config(self, rev: int | None = None, r1_val: int | None = None, r2_val: int | None = None) -> bool
+
+
+   * Description: Sets hardware configuration parameters (revision override, resistor values for voltage dividers) on the programmer. If no parameters are given, it reads the current configuration.
+   * Parameters:
+      * rev (int | None): Hardware revision override. -1 disables override.
+      * r1_val (int | None): Value for R1 (VPE divider).
+      * r2_val (int | None): Value for R2 (GND divider).
+   * Returns: bool - True if successful, False otherwise.
+
+
+* _read_voltage_loop(self, state_to_set: int, voltage_type_str: str, timeout_seconds: int | None = None) -> bool
+
+
+   * Description: Continuously reads and prints a specified voltage (VPP or VPE) from the programmer until timeout or programmer signals completion.
+   * Parameters:
+      * state_to_set (int): The command code to put the programmer into the correct voltage reading state.
+      * voltage_type_str (str): String describing the voltage type (e.g., "VPP", "VPE") for logging.
+      * timeout_seconds (int | None): Optional duration to read voltage before stopping.
+   * Returns: bool - True if reading proceeded as expected (even if timed out), False on error.
+
+
+* read_vpp_voltage(self, timeout_seconds: int | None = None) -> bool
+
+
+   * Description: Reads and displays the VPP voltage from the programmer.
+   * Parameters:
+      * timeout_seconds (int | None): Optional duration for continuous reading.
+   * Returns: bool - True on success/timeout, False on error.
+
+
+* read_vpe_voltage(self, timeout_seconds: int | None = None) -> bool
+
+
+   * Description: Reads and displays the VPE voltage from the programmer.
+   * Parameters:
+      * timeout_seconds (int | None): Optional duration for continuous reading.
+   * Returns: bool - True on success/timeout, False on error.
+Custom Exception
+* HardwareOperationError(Exception)
+   * Description: Custom exception for hardware operation failures.
+
+
+________________
+
+
+6. Firmware Management (firestarter/firmware.py)
+Manages firmware updates for the programmer.
+Class FirmwareManager
+Handles checking, downloading, and installing firmware.
+
+
+* __init__(self, config_manager: ConfigManager)
+
+
+   * Description: Initializes the FirmwareManager.
+   * Parameters:
+      * config_manager (ConfigManager): An instance of the configuration manager.
+   * Returns: None.
+
+
+* check_current_firmware(self, preferred_port: str | None = None) -> tuple[str | None, str | None, str | None]
+
+
+   * Description: Checks the currently installed firmware version and board type on the programmer.
+   * Parameters:
+      * preferred_port (str | None): Optional preferred serial port to check.
+   * Returns: tuple[str | None, str | None, str | None] - (port_name, current_version, board_name) or (None, None, None) on failure.
+
+
+* fetch_latest_release_info(self, board: str = "uno") -> tuple[str | None, str | None]
+
+
+   * Description: Fetches the latest firmware version string and download URL from the GitHub release page for a specified board.
+   * Parameters:
+      * board (str): The target board type (e.g., "uno", "leonardo").
+   * Returns: tuple[str | None, str | None] - (latest_version_str, download_url_str) or (None, None) on failure.
+
+
+* _compare_versions(self, current_version_str: str | None, latest_version_str: str | None) -> bool
+
+
+   * Description: Compares two version strings (e.g., "1.2.3").
+   * Parameters:
+      * current_version_str (str | None): The current version string.
+      * latest_version_str (str | None): The latest version string.
+   * Returns: bool - True if current version is greater than or equal to the latest version, False otherwise or if comparison fails.
+
+
+* _download_firmware_file(self, url: str) -> str | None
+
+
+   * Description: Downloads a firmware file from a given URL and saves it locally.
+   * Parameters:
+      * url (str): The URL to download the firmware from.
+   * Returns: str | None - The local path to the downloaded file, or None on failure.
+
+
+* _install_with_avrdude(self, hex_file_path: str, board: str, avrdude_path_override: str | None, avrdude_config_override: str | None, target_port: str | None) -> bool
+
+
+   * Description: Uses Avrdude to flash the firmware hex file to the specified board on the target port.
+   * Parameters:
+      * hex_file_path (str): Path to the firmware .hex file.
+      * board (str): Target board type (e.g., "uno", "leonardo").
+      * avrdude_path_override (str | None): Optional path to the Avrdude executable.
+      * avrdude_config_override (str | None): Optional path to the Avrdude configuration file.
+      * target_port (str | None): The serial port of the programmer.
+   * Returns: bool - True on successful flashing, False otherwise.
+
+
+* manage_firmware_update(self, install_flag: bool = False, avrdude_path_override: str | None = None, avrdude_config_override: str | None = None, port_override: str | None = None, board_override: str | None = "uno", force_install: bool = False) -> bool
+
+
+   * Description: Orchestrates the firmware update process: checks current version, fetches latest, compares, prompts user (if necessary), downloads, and installs.
+   * Parameters:
+      * install_flag (bool): If True, attempts installation if an update is available or if current version can't be determined.
+      * avrdude_path_override (str | None): Override for Avrdude executable path.
+      * avrdude_config_override (str | None): Override for Avrdude config path.
+      * port_override (str | None): Override for the serial port.
+      * board_override (str | None): Override for the board type.
+      * force_install (bool): If True, installs firmware even if it's up-to-date or current version is unknown.
+   * Returns: bool - True if the process completes as expected (update successful, or no update needed), False on significant failure.
+Custom Exception
+* FirmwareOperationError(Exception)
+   * Description: Custom exception for firmware operation failures.
+
+
+________________
+
+
+7. EPROM Information Presentation (firestarter/eprom_info.py)
+Manages retrieval, structuring, and console presentation of EPROM information.
+Class EpromConsolePresenter
+Uses EpromSpecBuilder and EpromDatabase to prepare and display EPROM details.
+
+
+* __init__(self, db_instance: EpromDatabase)
+
+
+   * Description: Initializes the presenter.
+   * Parameters:
+      * db_instance (EpromDatabase): An instance of the EPROM database.
+   * Returns: None.
+
+
+* _json_output_formatted(self, data: dict) -> str
+
+
+   * Description: Formats a dictionary as a pretty-printed JSON string, with special compacting for lists of numbers.
+   * Parameters:
+      * data (dict): The dictionary to format.
+   * Returns: str - The formatted JSON string.
+
+
+* _clean_config_for_export(self, raw_config: dict) -> dict
+
+
+   * Description: Cleans and structures raw EPROM configuration data for JSON export (e.g., for database_overrides.json).
+   * Parameters:
+      * raw_config (dict): The raw EPROM configuration dictionary.
+   * Returns: dict - The cleaned configuration dictionary.
+
+
+* _create_dip_layout_structure(self, pin_count: int, pin_names: list[str]) -> dict
+
+
+   * Description: Creates a structured dictionary representing a DIP package layout using pin count and names.
+   * Parameters:
+      * pin_count (int): The number of pins in the DIP package.
+      * pin_names (list[str]): A list of pin names in order.
+   * Returns: dict - Structured data for the DIP layout.
+
+
+* get_all_eproms_data(self, verified_only: bool = False) -> list[dict]
+
+
+   * Description: Retrieves a list of EPROM data from the database, optionally filtered by verification status.
+   * Parameters:
+      * verified_only (bool): If True, returns only EPROMs marked as verified.
+   * Returns: list[dict] - A list of EPROM data dictionaries.
+
+
+* search_eproms_by_name(self, query: str) -> list[dict]
+
+
+   * Description: Searches for EPROMs in the database by name.
+   * Parameters:
+      * query (str): The search query string.
+   * Returns: list[dict] - A list of matching EPROM data dictionaries.
+
+
+* prepare_detailed_eprom_data(self, eprom_name: str, eprom_details_full: dict | None, eprom_data_for_programmer: dict | None, raw_config_data: dict | None, manufacturer: str | None, include_export_config: bool = False) -> dict | None
+
+
+   * Description: Prepares a comprehensive data structure for a specific EPROM, including specifications, DIP layout, and optionally, configuration for export or programmer use.
+   * Parameters:
+      * eprom_name (str): Name of the EPROM.
+      * eprom_details_full (dict | None): Pre-fetched full EPROM details.
+      * eprom_data_for_programmer (dict | None): Pre-fetched concise EPROM data for programmer.
+      * raw_config_data (dict | None): Pre-fetched raw EPROM config.
+      * manufacturer (str | None): Manufacturer of the EPROM.
+      * include_export_config (bool): If True, includes cleaned config for export.
+   * Returns: dict | None - A dictionary containing structured EPROM details, or None if not found.
+
+
+* present_eprom_details(self, chip_data: dict | None, show_export_config: bool = False)
+
+
+   * Description: Formats and prints the structured chip data (EPROM details) to the console.
+   * Parameters:
+      * chip_data (dict | None): The structured EPROM data to present.
+      * show_export_config (bool): If True, also prints the exportable configuration JSON.
+   * Returns: None.
+Module Functions
+* print_eprom_list_table(eproms_data: list[dict], spec_builder: EpromSpecBuilder)
+   * Description: Prints a list of EPROM data in a formatted table to the console.
+   * Parameters:
+      * eproms_data (list[dict]): A list of EPROM data dictionaries (as returned by EpromDatabase.get_eproms or similar).
+      * spec_builder (EpromSpecBuilder): An instance of EpromSpecBuilder to help with formatting (e.g., getting chip type string).
+   * Returns: None.
+
+
+________________
+
+
+8. Serial Communication (firestarter/serial_comm.py)
+Manages low-level serial communication with the EPROM programmer.
+Class SerialCommunicator
+Handles port connection, sending/receiving data, and parsing responses.
+
+
+* __init__(self, port: str, baud_rate: int = int(BAUD_RATE), timeout: float = DEFAULT_SERIAL_TIMEOUT)
+
+
+   * Description: Initializes the serial communicator and attempts to connect to the specified port.
+   * Parameters:
+      * port (str): The serial port name (e.g., "/dev/ttyUSB0", "COM3").
+      * baud_rate (int): The baud rate for communication.
+      * timeout (float): Read timeout in seconds.
+   * Returns: None. Raises SerialError on connection failure.
+
+
+* is_connected(self) -> bool
+
+
+   * Description: Checks if the serial connection is active.
+   * Parameters: None.
+   * Returns: bool - True if connected, False otherwise.
+
+
+* send_bytes(self, data_bytes: bytes) -> int
+
+
+   * Description: Sends raw bytes over the serial connection.
+   * Parameters:
+      * data_bytes (bytes): The bytes to send.
+   * Returns: int - The number of bytes written. Raises SerialError or SerialTimeoutError.
+
+
+* send_string(self, data_string: str, encoding: str = "ascii") -> int
+
+
+   * Description: Encodes a string and sends it over the serial connection.
+   * Parameters:
+      * data_string (str): The string to send.
+      * encoding (str): The encoding to use (default "ascii").
+   * Returns: int - The number of bytes written.
+
+
+* send_json_command(self, command_dict: dict) -> int
+
+
+   * Description: Converts a dictionary to a JSON string and sends it as a command.
+   * Parameters:
+      * command_dict (dict): The command dictionary.
+   * Returns: int - The number of bytes written.
+
+
+* read_line_bytes(self) -> bytes | None
+
+
+   * Description: Reads a line (ending with newline) from the serial port as bytes. Non-blocking if no data is immediately available.
+   * Parameters: None.
+   * Returns: bytes | None - The line read (including newline), or None if no complete line is available or in_waiting is 0. Raises SerialError.
+
+
+* _parse_response_line(self, line_bytes: bytes) -> tuple[str | None, str | None]
+
+
+   * Description: Parses a raw byte line from the programmer, extracting a response type (e.g., "OK", "INFO", "ERROR") and the message content.
+   * Parameters:
+      * line_bytes (bytes): The raw line received from the programmer.
+   * Returns: tuple[str | None, str | None] - (response_type, message_content). Returns (None, original_line_str) if no known prefix is found.
+
+
+* _log_rurp_feedback(self, response_type: str | None, message: str | None)
+
+
+   * Description: Logs feedback received from the RURP (programmer) with appropriate logging levels based on the response type.
+   * Parameters:
+      * response_type (str | None): The type of response (e.g., "INFO", "ERROR").
+      * message (str | None): The message content.
+   * Returns: None.
+
+
+* get_response(self, timeout: float = DEFAULT_RESPONSE_TIMEOUT) -> tuple[str | None, str | None]
+
+
+   * Description: Waits for and retrieves a significant response (not INFO or DEBUG) from the programmer.
+   * Parameters:
+      * timeout (float): Maximum time to wait for a response.
+   * Returns: tuple[str | None, str | None] - (response_type, message). Raises SerialTimeoutError if no significant response is received within the timeout.
+
+
+* expect_ok(self, timeout: float = DEFAULT_RESPONSE_TIMEOUT) -> tuple[bool, str | None]
+
+
+   * Description: Waits for an "OK:" or "ERROR:" response from the programmer.
+   * Parameters:
+      * timeout (float): Maximum time to wait.
+   * Returns: tuple[bool, str | None] - (True, message) if "OK:" received, (False, message) if "ERROR:" received. Raises SerialTimeoutError.
+
+
+* send_ack(self)
+
+
+   * Description: Sends an "OK" string to the programmer, typically as an acknowledgment.
+   * Parameters: None.
+   * Returns: None.
+
+
+* consume_remaining_input(self, timeout: float = 0.5)
+
+
+   * Description: Reads and logs any remaining data in the serial input buffer to clear it.
+   * Parameters:
+      * timeout (float): Time to spend attempting to consume input.
+   * Returns: None.
+
+
+* disconnect(self)
+
+
+   * Description: Consumes remaining input and closes the serial connection.
+   * Parameters: None.
+   * Returns: None.
+
+
+* _log_command_details(self, command_dict: dict)
+
+
+   * Description: Logs the details of a command being sent to the programmer, including a human-readable interpretation of flags.
+   * Parameters:
+      * command_dict (dict): The command dictionary being sent.
+   * Returns: None.
+
+
+* _list_potential_ports(preferred_port: str | None = None, config_manager: ConfigManager | None = None) -> list[str] (static method)
+
+
+   * Description: Generates a list of potential serial ports where the programmer might be connected.
+   * Parameters:
+      * preferred_port (str | None): A specific port to prioritize.
+      * config_manager (ConfigManager | None): ConfigManager instance to get saved port.
+   * Returns: list[str] - A list of port names.
+
+
+* find_and_connect(cls, command_to_send: dict, preferred_port: str | None = None, baud_rate: int = int(BAUD_RATE)) -> "SerialCommunicator" (class method)
+
+
+   * Description: Scans potential serial ports, attempts to connect, sends an initial command, and expects an "OK" response to identify a compatible programmer.
+   * Parameters:
+      * command_to_send (dict): The initial JSON command to send upon successful connection to verify the programmer.
+      * preferred_port (str | None): A specific port to try first.
+      * baud_rate (int): The baud rate for communication.
+   * Returns: SerialCommunicator - An instance connected to the found programmer. Raises ProgrammerNotFoundError or SerialError.
+
+
+* read_data_block(self, num_bytes: int) -> bytes
+
+
+   * Description: Reads a specific number of bytes from the serial connection. Used for reading data chunks after a "DATA:" signal.
+   * Parameters:
+      * num_bytes (int): The number of bytes to read.
+   * Returns: bytes - The data read. Raises SerialError or SerialTimeoutError.
+Custom Exceptions
+* SerialError(Exception)
+   * Description: Custom exception for general serial communication errors.
+* SerialTimeoutError(SerialError)
+   * Description: Custom exception for serial timeouts.
+* ProgrammerNotFoundError(SerialError)
+   * Description: Custom exception when no compatible programmer is found.
+
+
+________________
+
+
+9. EPROM Specification Builder (firestarter/ic_layout.py)
+Builds a comprehensive dictionary of technical specifications for an EPROM.
+Class EpromSpecBuilder
+Generates structured EPROM specification data including pinouts, jumper settings, etc.
+
+
+* __init__(self, db_instance: EpromDatabase)
+
+
+   * Description: Initializes the EPROM specification builder.
+   * Parameters:
+      * db_instance (EpromDatabase): An instance of the EPROM database.
+   * Returns: None.
+
+
+* _select_jumper_label(self, jp_setting: int, label1: str, label2: str) -> str
+
+
+   * Description: Selects a jumper label based on its setting (1 or 2).
+   * Parameters:
+      * jp_setting (int): The jumper setting (1 or 2).
+      * label1 (str): Label for setting 1.
+      * label2 (str): Label for setting 2.
+   * Returns: str - The selected label, or "NA".
+
+
+* _get_rev1_jumper_settings_data(self, jp1: int, jp2: int, jp3: int) -> dict
+
+
+   * Description: Generates structured data for Rev 0.1 & 1.0 programmer jumper settings (JP1, JP2, JP3).
+   * Parameters:
+      * jp1 (int): Setting for JP1.
+      * jp2 (int): Setting for JP2.
+      * jp3 (int): Setting for JP3.
+   * Returns: dict - Structured jumper data.
+
+
+* _get_rev2_jumper_settings_data(self, jp4: int) -> dict
+
+
+   * Description: Generates structured data for Rev 2.0 & 2.1 programmer jumper settings (JP4).
+   * Parameters:
+      * jp4 (int): Setting for JP4.
+   * Returns: dict - Structured jumper data.
+
+
+* _get_rev2_2_jumper_settings_data(self, jp5: int) -> dict
+
+
+   * Description: Generates structured data for Rev 2.2 programmer jumper settings (JP5).
+   * Parameters:
+      * jp5 (int): Setting for JP5.
+   * Returns: dict - Structured jumper data.
+
+
+* get_chip_type_string(self, chip_type_int: int) -> str
+
+
+   * Description: Converts an integer chip type code to a human-readable string.
+   * Parameters:
+      * chip_type_int (int): The integer code for the chip type.
+   * Returns: str - Human-readable chip type (e.g., "EPROM", "Flash type 2").
+
+
+* _interpret_flags(self, flags: int) -> list[str]
+
+
+   * Description: Interprets an EPROM's integer flags value and returns a list of human-readable properties.
+   * Parameters:
+      * flags (int): The flags value from the EPROM data.
+   * Returns: list[str] - A list of strings describing the active flags.
+
+
+* _get_protocol_info_structured(self, protocol_id: int) -> dict | None
+
+
+   * Description: Retrieves structured information (type, description) for a given EPROM protocol ID.
+   * Parameters:
+      * protocol_id (int): The protocol ID.
+   * Returns: dict | None - Structured protocol information or None if not found.
+
+
+* _generate_pin_names_for_display(self, eprom_data: dict) -> list[str] | None
+
+
+   * Description: Generates a list of pin names for a DIP package display, considering generic layouts and specific pin map overrides from the database.
+   * Parameters:
+      * eprom_data (dict): The processed EPROM data dictionary.
+   * Returns: list[str] | None - A list of pin names in order, or None if layout cannot be determined.
+
+
+* build_specifications(self, eprom_data: dict) -> dict | None
+
+
+   * Description: Builds a comprehensive dictionary of technical specifications for a given EPROM.
+   * Parameters:
+      * eprom_data (dict): Fully mapped EPROM data from EpromDatabase.get_eprom(..., full=True).
+   * Returns: dict | None - A dictionary containing structured specifications, or None on error.
+
+
+________________
+
+
+10. AVR Tool Wrapper (firestarter/avr_tool.py)
+A wrapper for interacting with the Avrdude command-line utility.
+Class Avrdude
+Manages Avrdude command execution for flashing firmware.
+
+
+* __init__(self, partno: str, programmer_id: str, baud_rate: int, port: str, avrdude_config_path: str | None = None, avrdude_path: str | None = None)
+
+
+   * Description: Initializes the Avrdude wrapper. Finds Avrdude executable and config, gets version.
+   * Parameters:
+      * partno (str): AVR part number (e.g., "atmega328p").
+      * programmer_id (str): Avrdude programmer ID (e.g., "arduino").
+      * baud_rate (int): Baud rate for programming.
+      * port (str): Serial port for programming.
+      * avrdude_config_path (str | None): Optional path to avrdude.conf.
+      * avrdude_path (str | None): Optional path to Avrdude executable.
+   * Returns: None. Raises AvrdudeNotFoundError or AvrdudeConfigNotFoundError.
+
+
+* _find_avrdude_path(self, avrdude_path: str | None) -> str
+
+
+   * Description: Finds the full path to the Avrdude executable.
+   * Parameters:
+      * avrdude_path (str | None): A user-supplied path to check first.
+   * Returns: str - Full path to Avrdude. Raises AvrdudeNotFoundError.
+
+
+* _configure_avrconf(self, confpath: str | None) -> Path | None
+
+
+   * Description: Determines and validates the path to avrdude.conf. Only relevant for Avrdude versions < 7.0.
+   * Parameters:
+      * confpath (str | None): A user-supplied path for the config file or its directory.
+   * Returns: Path | None - Path object to avrdude.conf. Raises AvrdudeConfigNotFoundError. Returns None if not needed (Avrdude >= 7.0).
+
+
+* _get_avrdude_version(self) -> float | None
+
+
+   * Description: Retrieves and parses the Avrdude version number.
+   * Parameters: None.
+   * Returns: float | None - The Avrdude version as a float (e.g., 6.3, 7.1), or None if not determinable.
+
+
+* _execute_command(self, options: list[str]) -> tuple[str, int]
+
+
+   * Description: Executes an Avrdude command with the given options. Handles reset for atmega32u4 if needed.
+   * Parameters:
+      * options (list[str]): A list of command-line options for Avrdude.
+   * Returns: tuple[str, int] - (stderr_output, return_code).
+
+
+* _trigger_reset(self) -> bool
+
+
+   * Description: Triggers a reset on certain microcontrollers (like atmega32u4) by briefly opening and closing the serial port at 1200 baud.
+   * Parameters: None.
+   * Returns: bool - True if reset sequence attempted successfully, False on port error.
+
+
+* build_options(self, extra_flags: list[str] | None = None) -> list[str]
+
+
+   * Description: Builds a list of common Avrdude command-line options based on initialized parameters.
+   * Parameters:
+      * extra_flags (list[str] | None): Additional flags to append.
+   * Returns: list[str] - A list of Avrdude command options.
+
+
+* flash_firmware(self, hex_file: str, extra_flags: list[str] | None = None) -> tuple[str, int]
+
+
+   * Description: Flashes firmware to the microcontroller.
+   * Parameters:
+      * hex_file (str): Path to the .hex firmware file.
+      * extra_flags (list[str] | None): Additional Avrdude flags.
+   * Returns: tuple[str, int] - (stderr_output, return_code) from Avrdude execution.
+
+
+* test_connection(self, extra_flags: list[str] | None = None) -> tuple[str, int]
+
+
+   * Description: Tests the connection to the microcontroller using Avrdude (typically by trying to read the signature).
+   * Parameters:
+      * extra_flags (list[str] | None): Additional Avrdude flags.
+   * Returns: tuple[str, int] - (stderr_output, return_code) from Avrdude execution.
+Custom Exceptions
+* AvrdudeNotFoundError(FileNotFoundError)
+   * Description: Raised when the Avrdude executable cannot be found.
+* AvrdudeConfigNotFoundError(FileNotFoundError)
+   * Description: Raised when the avrdude.conf file cannot be found (for Avrdude < 7.0).
+
+
+________________
+
+
+11. Utility Functions (firestarter/utils.py)
+General utility functions used across the application.
+
+
+* extract_hex_to_decimal(input_string: str) -> int | None
+
+
+   * Description: Extracts the first hexadecimal number (e.g., "0x1A2B") from a string and converts it to its decimal representation.
+   * Parameters:
+      * input_string (str): The string to search within.
+   * Returns: int | None - The decimal value, or None if no hex number is found.
+
+
+* is_valid_hex_string(hex_string: str) -> bool
+
+
+   * Description: Validates if a given string is a fully valid hexadecimal representation (e.g., "0xABCD", not just "ABCD").
+   * Parameters:
+      * hex_string (str): The string to validate.
+   * Returns: bool - True if it's a valid hex string, False otherwise.
+
+
+* format_size(size_in_bytes: int) -> str
+
+
+   * Description: Formats a size in bytes into a human-readable string (B, KB, MB, GB, TB).
+   * Parameters:
+      * size_in_bytes (int): The size in bytes.
+   * Returns: str - Human-readable file size string.
+
+
+* time_formatter(seconds: float) -> str
+
+
+   * Description: Formats a duration in seconds into a human-readable string (e.g., "1h 2m 3s", "4m 5s", "6s").
+   * Parameters:
+      * seconds (float): The duration in seconds.
+   * Returns: str - Formatted time string.
