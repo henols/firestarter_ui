@@ -1,3 +1,2 @@
-# firestarter_ui/__init__.py
-# This file makes Python treat the directory as a package.
-__version__ = "0.0.1"
+# Init file for the firestarter_ui package
+__version__ = "0.1.0"

@@ -5,7 +5,6 @@ Handles interactions with the Firestarter library.
 This module abstracts the Firestarter library calls, executes them in
 non-blocking threads, and uses callbacks to send results or errors
 back to the ui_manager.
-"""
 import threading
 import logging
 from queue import Queue
