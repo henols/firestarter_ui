@@ -1,582 +1,755 @@
-# ui_manager.py
+# firestarter_ui/ui_manager.py
 """
 Manages the Tkinter UI for the Firestarter application.
 
 This module houses the main Tkinter application class (FirestarterApp),
-manages UI construction (window, menus, panels per PRD), widget layout,
-event handling, delegates tasks to firestarter_operations.py, and
-updates UI via callbacks.
+manages UI construction, widget layout, event handling, delegates tasks
+to firestarter_operations.py, and updates UI via callbacks/queue.
 """
-
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
-import logging  # For capturing logs from the (mock) library
+from tkinter import ttk, filedialog, messagebox
+import logging
+import os  # Added for path operations
+from pathlib import Path  # Added for path operations
+from queue import Queue
 
-from firestarter_operations import FirestarterController
+from firestarter import __version__ as firestarter_version
+from firestarter_ui import __version__ as ui_version
+
+from firestarter_ui.firestarter_operations import FirestarterOperations
+from firestarter_ui.operation_panels import OPERATION_PANELS
+
+# Import Firestarter components for direct use in UI
+from firestarter.database import EpromDatabase
+from firestarter_ui.firestarter_operations import (
+    FIRESTARTER_AVAILABLE,
+)  # To check if real DB can be used
+from firestarter.config import ConfigManager as RealFirestarterConfigManager
+
+# If these modules are imported, we assume the Firestarter library is available.
+FIRESTARTER_AVAILABLE = True
+FIRESTARTER_CONFIG_AVAILABLE = True
 
 
-class FirestarterApp:
-    """Main application class for the Firestarter GUI."""
+class QueueHandler(logging.Handler):
+    """A custom logging handler that sends records to a queue."""
 
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Firestarter UI")
-        self.root.geometry("800x600")
+    def __init__(self, queue):
+        super().__init__()
+        self.queue = queue
 
-        self.current_operation = None
-        self.operation_params_widgets = {}  # To store dynamically created widgets
+    def emit(self, record):
+        """
+        Puts the formatted log message into the queue with a specific type.
+        """
+        self.queue.put(("rurp_log", self.format(record)))
 
-        # Create essential UI components first, especially the console for logging
-        self._create_main_layout()
-        self._create_output_console() # self.console_text is created here
 
-        # Configure logging to capture messages from the operations module (and mock library)
-        # This needs self.console_text to be available via log_to_console
-        self.log_capture_handler = self._configure_logging()
+class PreferencesDialog(tk.Toplevel):
+    def __init__(self, parent, config_manager):
+        super().__init__(parent)
+        self.transient(parent)
+        self.title("Preferences")
+        self.config_manager = config_manager
 
-        # Initialize Firestarter Operations Controller after console and logging are set up
-        self.operations_controller = FirestarterController(self.handle_operation_update)
+        # Logging Settings
+        logging_frame = ttk.Frame(self, padding="10")
+        logging_frame.pack(fill=tk.X)
+        self.verbose_logging = tk.BooleanVar(
+            value=self.config_manager.get_value("verbose_logging", default=False)
+        )
+        verbose_check = ttk.Checkbutton(
+            logging_frame,
+            text="Enable Verbose Logging",
+            variable=self.verbose_logging,
+        )
+        verbose_check.pack(anchor=tk.W, pady=(0, 2))
 
-        self._create_menu()
-        self._create_toolbar()
-        self._create_config_panel()  # For EPROM and Programmer selection
-        self._create_operation_options_panel()
-        self._create_execute_button()
-        self._create_status_bar()
+        # Debug Logging Setting
+        self.debug_logging = tk.BooleanVar(
+            value=self.config_manager.get_value("debug_logging", default=False)
+        )
+        debug_check = ttk.Checkbutton(
+            logging_frame,
+            text="Enable Debug Logging",
+            variable=self.debug_logging,
+        )
+        debug_check.pack(anchor=tk.W, pady=2)
 
-        self.update_programmer_list()
-        self.update_eprom_list()
+        # Add other settings as needed, e.g.,
+        # - Default directory for file operations
+        # - Serial port settings (if not auto-detected)
+        # - UI theme options
 
-        # Start polling the queue for results from operations controller
-        self.root.after(100, self.process_operation_queue)
+        # Example: Default Directory
+        # dir_frame = ttk.Frame(self, padding="10")
+        # dir_frame.pack(fill=tk.X)
+        # ttk.Label(dir_frame, text="Default Directory:").pack(side=tk.LEFT)
+        # self.default_dir = tk.StringVar(value=self.config_manager.get_value("default_dir", default="."))
+        # ttk.Entry(dir_frame, textvariable=self.default_dir).pack(side=tk.LEFT, expand=True, fill=tk.X)
 
-    def _configure_logging(self):
-        """Configures logging to capture messages into the UI console."""
-        log_text_handler = UITextViewHandler(self)
-        log_text_handler.setFormatter(
-            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        # Buttons
+        button_frame = ttk.Frame(self, padding="10")
+        button_frame.pack(fill=tk.X)
+        ttk.Button(button_frame, text="Save", command=self.save_preferences).pack(
+            side=tk.RIGHT
+        )
+        ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(
+            side=tk.RIGHT, padx=5
         )
 
-        # Configure root logger or specific logger used by firestarter_operations
-        # For simplicity, let's assume firestarter_operations (and its mock lib) use a logger
-        # named "MockFirestarterLib" or similar. If it uses root logger, configure that.
-        logger = logging.getLogger()  # Get root logger
-        logger.addHandler(log_text_handler)
-        logger.setLevel(logging.INFO)  # Set desired level
-        return log_text_handler
+    def save_preferences(self):
+        self.config_manager.set_value("verbose_logging", self.verbose_logging.get())
+        self.config_manager.set_value("debug_logging", self.debug_logging.get())
+        self.destroy()
 
-    def _create_main_layout(self):
-        """Creates the main frames for UI sections."""
-        self.top_frame = ttk.Frame(self.root, padding="5")
-        self.top_frame.pack(side=tk.TOP, fill=tk.X)
 
-        self.middle_frame = ttk.Frame(self.root, padding="5")
-        self.middle_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+class EpromSearchDialog(tk.Toplevel):
+    def __init__(self, parent, all_eproms, title="Search EPROM"):
+        super().__init__(parent)
 
-        self.bottom_frame = ttk.Frame(self.root, padding="5")
-        self.bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+class EpromSearchDialog(tk.Toplevel):
+    def __init__(self, parent, all_eproms, title="Search EPROM"):
+        super().__init__(parent)
+        self.transient(parent)  # Show above parent
+        self.title(title)
+        self.parent = parent
+        self.all_eproms = sorted(list(set(all_eproms)))  # Ensure unique and sorted
+        self.result = None
+
+        self.geometry("400x350")  # Adjust as needed
+
+        # Search Entry
+        search_frame = ttk.Frame(self, padding="5")
+        search_frame.pack(fill=tk.X)
+        ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
+        self.search_entry.pack(fill=tk.X, expand=True)
+        self.search_entry.bind("<KeyRelease>", self._on_search_keypress)
+
+        # Listbox with Scrollbar
+        list_frame = ttk.Frame(self, padding="5")
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        self.listbox = tk.Listbox(
+            list_frame, exportselection=False
+        )  # exportselection=False allows programmatic selection
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(
+            list_frame, orient=tk.VERTICAL, command=self.listbox.yview
+        )
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.listbox.config(yscrollcommand=scrollbar.set)
+        self.listbox.bind("<<ListboxSelect>>", self._on_listbox_select)
+        self.listbox.bind("<Double-1>", self._on_select_button)  # Double click
+
+        # Buttons
+        button_frame = ttk.Frame(self, padding="5")
+        button_frame.pack(fill=tk.X)
+        self.select_button = ttk.Button(
+            button_frame,
+            text="Select",
+            command=self._on_select_button,
+            state=tk.DISABLED,
+        )
+        self.select_button.pack(side=tk.RIGHT, padx=5)
+        cancel_button = ttk.Button(
+            button_frame, text="Cancel", command=self._on_cancel_button
+        )
+        cancel_button.pack(side=tk.RIGHT)
+
+        self._populate_listbox(self.all_eproms)  # Initial population
+        self.search_entry.focus_set()
+
+        self.protocol(
+            "WM_DELETE_WINDOW", self._on_cancel_button
+        )  # Handle window close button
+        self.grab_set()  # Make modal
+        self.wait_window(self)  # Wait until this window is destroyed
+
+    def _populate_listbox(self, items):
+        self.listbox.delete(0, tk.END)
+        for item in items:
+            self.listbox.insert(tk.END, item)
+        self._on_listbox_select()  # Update button state
+
+    def _on_search_keypress(self, event=None):
+        query = self.search_var.get().lower()
+        if not query:
+            filtered_eproms = self.all_eproms
+        else:
+            filtered_eproms = [
+                eprom for eprom in self.all_eproms if query in eprom.lower()
+            ]
+        self._populate_listbox(filtered_eproms)
+
+    def _on_listbox_select(self, event=None):
+        if self.listbox.curselection():
+            self.select_button.config(state=tk.NORMAL)
+        else:
+            self.select_button.config(state=tk.DISABLED)
+
+    def _on_select_button(self, event=None):
+        selected_indices = self.listbox.curselection()
+        if selected_indices:
+            self.result = self.listbox.get(selected_indices[0])
+        self.destroy()
+
+    def _on_cancel_button(self):
+        self.result = None
+        self.destroy()
+
+
+class FirestarterApp(tk.Tk):
+    """
+    Main application class for the Firestarter UI.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.title("Firestarter UI")
+        self.LAST_EPROM_CONFIG_KEY = "eprom"  # More specific key
+        self.LAST_DEVICE_CONFIG_KEY = "device_port"  # More specific key
+        self.WINDOW_GEOMETRY_CONFIG_KEY = "window_geometry"
+        self.VERBOSE_LOGGING_CONFIG_KEY = "verbose_logging"
+        self.DEBUG_LOGGING_CONFIG_KEY = "debug_logging"
+        self.LAST_OPERATION_CONFIG_KEY = "last_operation"
+        # Initialize FirestarterOperations and ConfigManager early to use for geometry
+        self.db = EpromDatabase()  # Initialize EpromDatabase instance (db)
+
+        self.ui_queue = Queue()
+
+        self.selected_device = tk.StringVar()
+
+        # Initialize EpromDatabase instance to be passed to FirestarterOperations
+        # This instance (db_for_operations) will be the one used by FirestarterOperations
+
+        # Initialize ConfigManager for the UI, using "config_ui.json"
+        self.config_manager = None
+        self.config_manager = RealFirestarterConfigManager(
+            config_filename="config_ui.json"
+        )
+        logging.info("ConfigManager for UI (config_ui.json) initialized.")
+
+        self.firestarter_ops = FirestarterOperations(
+            self.ui_queue, self.db, self.config_manager
+        )
+
+        # Load and set window geometry
+        saved_geometry = self.config_manager.get_value(self.WINDOW_GEOMETRY_CONFIG_KEY)
+        if saved_geometry:
+            logging.debug(f"Restoring window geometry: {saved_geometry}")
+            self.geometry(saved_geometry)
+
+        last_device = self.config_manager.get_value(self.LAST_DEVICE_CONFIG_KEY)
+        if last_device and last_device != "None":
+            self.selected_device.set(last_device)
+        else:
+            self.selected_device.set(
+                "None"
+            )  # Ensure consistent default if not found or "None"
+
+        self.current_operation = None
+        # Load last selected EPROM
+        last_eprom = "None"
+        saved_eprom = self.config_manager.get_value(self.LAST_EPROM_CONFIG_KEY)
+        if saved_eprom and saved_eprom != "None":
+            last_eprom = saved_eprom
+
+        self.selected_eprom_type = tk.StringVar(value=last_eprom)
+
+        self.all_eprom_names = (
+            []
+        )  # To store the full list of EPROMs for the search dialog
+        self.current_operation_panel = (
+            None  # To store the instance of the current operation panel
+        )
+        saved_verbose_setting = self.config_manager.get_value(
+            self.VERBOSE_LOGGING_CONFIG_KEY, default=False
+        )
+        self.verbose_logging = tk.BooleanVar(value=saved_verbose_setting)
+
+        saved_debug_setting = self.config_manager.get_value(
+            self.DEBUG_LOGGING_CONFIG_KEY, default=False
+        )
+        self.debug_logging = tk.BooleanVar(value=saved_debug_setting)
+
+        self._setup_logging()  # Configure basicConfig once.
+        self._create_menu()
+        self._create_toolbar()  # Placeholder
+        self._create_device_eprom_selection_area()
+        self._create_main_layout()  # For options panel and output console
+        self._create_status_bar()
+
+        self.after(100, self._process_ui_queue)  # Start polling the queue
+        self._update_logging_level()  # Init logging level from config
+        # Initial population of EPROM list
+        self.firestarter_ops.get_eprom_list()
+
+        # Handle window close event
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+
+        # Load last selected operation panel, default to "read"
+        last_operation = self.config_manager.get_value(
+            self.LAST_OPERATION_CONFIG_KEY, default="read"
+        )
+        self._select_operation(last_operation, set_default=False)
+
+    def _setup_logging(self):
+        """Configures the logging system once at startup."""
+        # This ensures basicConfig is only called once.
+        logging.basicConfig(
+            level=logging.INFO,  # Default level, will be updated by _update_logging_level
+            format="%(asctime)s - %(name)-15s - %(levelname)-7s - %(message)s",
+        )
+
+        # Intercept RURP logs from the firestarter library and direct to UI console
+        rurp_logger = logging.getLogger("RURP")
+        queue_handler = QueueHandler(self.ui_queue)
+        # Use a simple formatter that just passes the message through,
+        # as the RURP logger already formats it nicely (e.g., "INFO: Programmer reset").
+        formatter = logging.Formatter("%(message)s")
+        queue_handler.setFormatter(formatter)
+        rurp_logger.addHandler(queue_handler)
+
+    def _update_logging_level(self):
+        """Updates the application's logging level based on the verbose flag."""
+        log_level = logging.DEBUG if  not self.debug_logging == None and self.debug_logging.get() else logging.INFO
+        logging.getLogger().setLevel(log_level)  # For UI logs
+
+        # Also update the level in firestarter_operations
+        if self.firestarter_ops:
+            self.firestarter_ops.set_logging_level(log_level)
+
+        # Add a handler to also log to our UI console if desired, or rely on queue
 
     def _create_menu(self):
-        """Creates the main application menu bar (FR-001.A)."""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
 
         # File Menu
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Exit", command=self.root.quit)
+        file_menu.add_command(
+            label="Open Configuration...", state=tk.DISABLED
+        )  # FR-001.A
+        file_menu.add_command(
+            label="Save Configuration...", state=tk.DISABLED
+        )  # FR-001.A
+        file_menu.add_separator()
+        file_menu.add_command(label="Preferences...", command=self._open_preferences)
+        file_menu.add_separator()
+        file_menu.add_command(
+            label="Exit", command=self._on_closing
+        )  # Changed to call _on_closing
         menubar.add_cascade(label="File", menu=file_menu)
 
-        # Operations Menu (FR-002)
+        # Eproms Menu
+        eprom_menu = tk.Menu(menubar, tearoff=0)
+        # Add Search command to Eproms menu
+        eprom_menu.add_command(
+            label="Search...", command=self._open_eprom_search_dialog
+        )
+        eprom_menu.add_command(label="Info...", state=tk.DISABLED)  # FR-001.A
+        menubar.add_cascade(label="Eproms", menu=eprom_menu)
+
+        # Operations Menu
         operations_menu = tk.Menu(menubar, tearoff=0)
-        operations = [
-            ("Read EPROM", "read"),
-            ("Write EPROM", "write"),
-            ("Verify EPROM", "verify"),
-            ("Erase EPROM", "erase"),
-            ("Check Chip ID", "check_id"),
-            ("Blank Check", "blank_check"),
-        ]
-        for label, op_key in operations:
-            operations_menu.add_command(
-                label=label, command=lambda op=op_key: self.select_operation(op)
-            )
+        operations_menu.add_command(
+            label="Read EPROM", command=lambda: self._select_operation("read")
+        )
+        operations_menu.add_command(
+            label="Write EPROM", command=lambda: self._select_operation("write")
+        )
+        operations_menu.add_command(
+            label="Verify EPROM", command=lambda: self._select_operation("verify")
+        )
+        operations_menu.add_command(
+            label="Erase EPROM", command=lambda: self._select_operation("erase")
+        )
+        operations_menu.add_command(
+            label="Check Chip ID", command=lambda: self._select_operation("check_id")
+        )
+        operations_menu.add_command(
+            label="Blank Check", command=lambda: self._select_operation("blank_check")
+        )
+        operations_menu.add_separator()
+        operations_menu.add_command(
+            label="[Placeholder: Advanced Op 1]", state=tk.DISABLED
+        )
         menubar.add_cascade(label="Operations", menu=operations_menu)
 
-        # Programmer Menu (FR-005)
-        self.programmer_menu = tk.Menu(menubar, tearoff=0)
-        self.programmer_menu.add_command(
-            label="Detect Programmers", command=self.update_programmer_list
+        # Programmer Menu
+        self.programmer_menu = tk.Menu(
+            menubar, tearoff=0
+        )  # Store as instance var to update
+        # Refresh device list when the programmer menu is about to be displayed
+        self.programmer_menu.config(postcommand=self._on_detect_devices)
+
+        self.select_device_submenu = tk.Menu(self.programmer_menu, tearoff=0)
+        self.programmer_menu.add_cascade(
+            label="Select Device", menu=self.select_device_submenu
         )
+        self.select_device_submenu.add_command(
+            label=" (Detecting...) ", state=tk.DISABLED
+        )  # Placeholder
         self.programmer_menu.add_separator()
-        # Programmer devices will be added dynamically here
+        self.programmer_menu.add_command(
+            label="Update Programmer Firmware...", state=tk.DISABLED
+        )
+        self.programmer_menu.add_command(label="About Programmer...", state=tk.DISABLED)
         menubar.add_cascade(label="Programmer", menu=self.programmer_menu)
-        self.selected_programmer_var = tk.StringVar()
 
         # Help Menu
         help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="About", command=self.show_about_dialog)
+        help_menu.add_command(label="About Firestarter UI...", command=self._on_about)
+        help_menu.add_command(label="View Documentation...", state=tk.DISABLED)
         menubar.add_cascade(label="Help", menu=help_menu)
 
     def _create_toolbar(self):
-        """Creates a toolbar with buttons for common operations."""
-        toolbar = ttk.Frame(self.top_frame, relief=tk.RAISED, borderwidth=1)
-        toolbar.pack(side=tk.TOP, fill=tk.X, pady=(0, 5))
-
-        # Example toolbar buttons - map to operations
-        buttons = [
-            ("Read", "read"),
-            ("Write", "write"),
-            ("Verify", "verify"),
-            ("Erase", "erase"),
-        ]
-        for text, op_key in buttons:
-            btn = ttk.Button(
-                toolbar, text=text, command=lambda op=op_key: self.select_operation(op)
-            )
-            btn.pack(side=tk.LEFT, padx=2, pady=2)
-
-    def _create_config_panel(self):
-        """Creates panel for EPROM and Programmer selection (FR-004, FR-005)."""
-        config_frame = ttk.LabelFrame(self.top_frame, text="Configuration", padding="5")
-        config_frame.pack(side=tk.TOP, fill=tk.X, expand=True)
-
-        # EPROM Selection (FR-004)
-        ttk.Label(config_frame, text="EPROM Type:").grid(
-            row=0, column=0, padx=5, pady=5, sticky=tk.W
-        )
-        self.eprom_var = tk.StringVar()
-        self.eprom_combobox = ttk.Combobox(
-            config_frame, textvariable=self.eprom_var, state="readonly", width=20
-        )
-        self.eprom_combobox.grid(row=0, column=1, padx=5, pady=5, sticky=tk.EW)
-        self.eprom_combobox.bind("<<ComboboxSelected>>", self.on_eprom_selected)
-
-        # Selected Programmer Display (updated via menu)
-        ttk.Label(config_frame, text="Programmer:").grid(
-            row=0, column=2, padx=5, pady=5, sticky=tk.W
-        )
-        self.programmer_display_var = tk.StringVar(value="None Selected")
+        # FR-002: Toolbar (Optional quick access)
+        self.toolbar = ttk.Frame(self, padding="2")
+        self.toolbar.pack(side=tk.TOP, fill=tk.X)
+        # Example: ttk.Button(self.toolbar, text="Read", command=lambda: self._select_operation("read")).pack(side=tk.LEFT)
+        # For now, keeping it minimal as per "can be hidden"
         ttk.Label(
-            config_frame, textvariable=self.programmer_display_var, width=25
-        ).grid(row=0, column=3, padx=5, pady=5, sticky=tk.EW)
+            self.toolbar, text="Toolbar (placeholder for icons/quick actions)"
+        ).pack(side=tk.LEFT)
 
-        config_frame.columnconfigure(1, weight=1)
-        config_frame.columnconfigure(3, weight=1)
+    def _create_device_eprom_selection_area(self):
+        # FR-004, FR-005
+        frame = ttk.Frame(self, padding="5")
+        frame.pack(side=tk.TOP, fill=tk.X)
 
-    def _create_operation_options_panel(self):
-        """Creates the panel for operation-specific options (FR-003)."""
-        self.options_panel_frame = ttk.LabelFrame(
-            self.middle_frame, text="Operation Options", padding="10"
+        ttk.Label(frame, text="Selected Device:").grid(
+            row=0, column=0, sticky=tk.W, padx=2
         )
-        self.options_panel_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
-        # Content will be populated dynamically by select_operation()
-
-    def _create_output_console(self):
-        """Creates the text area for status messages and logs (FR-006)."""
-        console_frame = ttk.LabelFrame(
-            self.middle_frame, text="Output Console", padding="5"
+        ttk.Label(frame, textvariable=self.selected_device).grid(
+            row=0, column=1, sticky=tk.EW, padx=2
         )
-        console_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=5)
 
-        self.console_text = scrolledtext.ScrolledText(
-            console_frame, wrap=tk.WORD, height=10, state=tk.DISABLED
+        ttk.Label(frame, text="EPROM Type:").grid(row=1, column=0, sticky=tk.W, padx=2)
+        # Changed from Combobox to a Label to display selected EPROM
+        self.selected_eprom_label = ttk.Label(
+            frame, textvariable=self.selected_eprom_type, relief=tk.SUNKEN, padding=2
         )
-        self.console_text.pack(fill=tk.BOTH, expand=True)
+        self.selected_eprom_label.grid(row=1, column=1, sticky=tk.EW, padx=2)
 
-    def _create_execute_button(self):
-        """Creates the execute button (FR-007)."""
-        self.execute_button = ttk.Button(
-            self.bottom_frame,
-            text="Execute Operation",
-            command=self.execute_current_operation,
-            state=tk.DISABLED,
+        self.search_eprom_button = ttk.Button(
+            frame, text="Search", command=self._open_eprom_search_dialog
         )
-        self.execute_button.pack(side=tk.RIGHT, padx=5, pady=5)
+        self.search_eprom_button.grid(row=1, column=2, padx=(5, 2), sticky=tk.W)
+        frame.columnconfigure(1, weight=1)
+
+    def _create_main_layout(self):
+        main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        main_pane.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Operation Options Panel (FR-003)
+        self.options_panel_frame = ttk.Labelframe(
+            main_pane, text="Operation Options", padding="5"
+        )
+        main_pane.add(self.options_panel_frame, weight=1)
+        ttk.Label(
+            self.options_panel_frame, text="(Select an operation from the menu)"
+        ).pack(padx=5, pady=5)
+
+        # Output Console (FR-006)
+        console_frame = ttk.Labelframe(main_pane, text="Output Console", padding="5")
+        main_pane.add(console_frame, weight=2)
+
+        self.output_console = tk.Text(
+            console_frame, wrap=tk.WORD, height=15, state=tk.DISABLED
+        )
+        console_scrollbar = ttk.Scrollbar(
+            console_frame, orient=tk.VERTICAL, command=self.output_console.yview
+        )
+        self.output_console.config(yscrollcommand=console_scrollbar.set)
+
+        self.output_console.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        console_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
     def _create_status_bar(self):
-        """Creates a simple status bar."""
-        self.status_var = tk.StringVar()
-        self.status_var.set("Ready")
-        status_bar = ttk.Label(
-            self.bottom_frame,
-            textvariable=self.status_var,
-            relief=tk.SUNKEN,
-            anchor=tk.W,
+        status_frame = ttk.Frame(self, relief=tk.SUNKEN, padding=0)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.status_bar = ttk.Label(status_frame, text="Status: Ready", anchor=tk.W)
+        self.status_bar.pack(side=tk.LEFT, padx=2)  # Removed fill=tk.X, expand=True
+
+        self.progress_bar = ttk.Progressbar(
+            status_frame, orient=tk.HORIZONTAL, mode="determinate"
         )
-        status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5, pady=5)
+        # The progress bar will be packed/unpacked as needed, so don't pack it here initially.
 
-    def log_to_console(self, message, level="INFO"):
-        """Appends a message to the output console."""
-        self.console_text.config(state=tk.NORMAL)
-        self.console_text.insert(tk.END, f"[{level.upper()}] {message}\n")
-        self.console_text.see(tk.END)  # Scroll to the end
-        self.console_text.config(state=tk.DISABLED)
+    def _log_to_console(self, message: str, level: str = "INFO"):
+        self.output_console.config(state=tk.NORMAL)
+        self.output_console.insert(tk.END, f"[{level}] {message}\n")
+        self.output_console.see(tk.END)
+        self.output_console.config(state=tk.DISABLED)
+        if level.upper() == "ERROR":
+            logging.error(message)
+        elif level.upper() == "WARNING":
+            logging.warning(message)
+        else:
+            logging.info(message)
 
-    def update_programmer_list(self):
-        """Fetches and updates the list of available programmers in the menu."""
-        self.log_to_console("Detecting programmers...")
-        programmers = self.operations_controller.get_available_programmers()
+    def _update_status_bar(self, message: str):
+        self.status_bar.config(
+            text=f"Status: {message} | Device: {self.selected_device.get()} | EPROM: {self.selected_eprom_type.get()}"
+        )
 
-        # Clear existing programmer entries (skip first 2: Detect, Separator)
-        last_entry_index = self.programmer_menu.index(tk.END)
+    def _process_ui_queue(self):
+        """Processes messages from the firestarter_operations queue."""
+        try:
+            while not self.ui_queue.empty():
+                msg_type, data = self.ui_queue.get_nowait()
+
+                if msg_type == "status":
+                    # Reset progress bar at the start of an operation
+                    if "started" in data and self.progress_bar.winfo_ismapped():
+                        self.progress_bar.pack_forget()
+                    self._log_to_console(data, "INFO")
+                    self._update_status_bar(data)
+                elif msg_type == "error":
+                    self._log_to_console(data, "ERROR")
+                    messagebox.showerror("Operation Error", data)
+                    self._update_status_bar(f"Error: {data[:50]}...")
+                    if self.progress_bar.winfo_ismapped():
+                        self.progress_bar.pack_forget()
+                elif msg_type == "progress":
+                    current, total = data
+                    if not self.progress_bar.winfo_ismapped():
+                        self.progress_bar.pack(
+                            side=tk.RIGHT, padx=5, pady=1, fill=tk.X, expand=True
+                        )
+
+                    if total > 0:
+                        self.progress_bar["maximum"] = total
+                        self.progress_bar["value"] = current
+                elif msg_type == "result":
+                    op_name, op_result = data
+                    self._log_to_console(f"{op_name} result: {op_result}", "INFO")
+                    # Handle specific results, e.g., device list
+                    if op_name == "Detect Devices":
+                        self._populate_device_menu(op_result)
+                elif msg_type == "eprom_list" or msg_type == "eprom_search_results":
+                    if isinstance(data, list) and (
+                        not data or data[0] != "Error: DB not loaded"
+                    ):
+                        self.all_eprom_names = data
+                        # If no EPROM is selected and we got a list, we don't auto-select anymore.
+                        # User must use the search dialog.
+                        # However, if a previously selected EPROM (from config) is not in the new list,
+                        # we might want to reset it, or just let it be (it won't be valid for ops).
+                        # For now, we just store the list. The selected_eprom_type is handled by config or search.
+                    elif (
+                        isinstance(data, list)
+                        and data
+                        and data[0] == "Error: DB not loaded"
+                    ):
+                        self.all_eprom_names = []  # Clear if error
+                    elif (
+                        msg_type == "eprom_search_results"
+                    ):  # This message type might be unused now
+                        logging.warning(
+                            "Received 'eprom_search_results', but this path might be deprecated."
+                        )
+                elif msg_type == "rurp_log":
+                    type, msg = data.split(":")
+                    if not type == "DATA":
+                        self._log_to_console(msg, type)
+                elif msg_type == "operation_finished":
+                    # Re-enable UI elements if they were disabled
+                    self._update_status_bar(f"{data} finished. Ready.")
+                    if hasattr(self, "execute_button") and self.execute_button:
+                        self.execute_button.config(state=tk.NORMAL)
+                    if self.progress_bar.winfo_ismapped():
+                        # Ensure it shows 100% before hiding
+                        self.progress_bar["value"] = self.progress_bar["maximum"]
+                        self.progress_bar.after(500, self.progress_bar.pack_forget)
+
+        except Exception as e:
+            logging.error(f"Error processing UI queue: {e}")
+        finally:
+            self.after(100, self._process_ui_queue)  # Poll again
+
+    def _on_eprom_selected(self, event=None):
+        # This method is now called after a successful selection from the search dialog
+        selected = self.selected_eprom_type.get()
+        self._log_to_console(f"EPROM Type selected: {selected}")
+        self._update_status_bar(f"EPROM selected: {selected}")
+        self.config_manager.set_value(self.LAST_EPROM_CONFIG_KEY, selected)
+        if self.current_operation:
+            self._update_operation_options_panel(self.current_operation)
+
+    def _open_eprom_search_dialog(self):
+        if not self.all_eprom_names:
+            messagebox.showinfo(
+                "EPROM Search",
+                "EPROM list not loaded or empty. Please wait or check logs.",
+            )
+            self.firestarter_ops.get_eprom_list()  # Try to refresh
+            return
+
+        dialog = EpromSearchDialog(self, self.all_eprom_names, title="Search EPROM")
+        if dialog.result:
+            self.selected_eprom_type.set(dialog.result)
+            self._on_eprom_selected()  # Trigger updates based on new selection
+
+    def _on_detect_devices(self):
+        self._log_to_console("Detecting programmer devices...")
+        self.firestarter_ops.detect_devices()
+
+    def _populate_device_menu(self, devices):
+        self.select_device_submenu.delete(0, tk.END)  # Clear old entries
+
+        valid_devices = []
         if (
-            last_entry_index is not None and last_entry_index >= 1
-        ):  # Ensure there are items beyond separator
-            for i in range(
-                last_entry_index, 1, -1
-            ):  # Iterate backwards from last to index 2
-                self.programmer_menu.delete(i)
+            devices
+            and isinstance(devices, list)
+            and devices[0] != "No programmers found"
+            and not (
+                devices[0]
+                and isinstance(devices[0], str)
+                and devices[0].startswith("Error")
+            )
+        ):
+            valid_devices = [
+                d for d in devices if isinstance(d, str) and d
+            ]  # Filter out non-string or empty
 
-        if programmers:
-            for programmer in programmers:
-                self.programmer_menu.add_radiobutton(
-                    label=programmer,
-                    variable=self.selected_programmer_var,
-                    value=programmer,
-                    command=lambda p=programmer: self.on_programmer_selected(p),
+        if valid_devices:
+            for device_info in valid_devices:
+                self.select_device_submenu.add_radiobutton(
+                    label=device_info,
+                    variable=self.selected_device,  # Ties to the StringVar
+                    value=device_info,  # Value this radiobutton represents
+                    command=lambda dev=device_info: self._set_selected_device(dev),
                 )
-            self.log_to_console(f"Found programmers: {', '.join(programmers)}")
-            if (
-                not self.selected_programmer_var.get() and programmers
-            ):  # Auto-select first if none selected
-                self.selected_programmer_var.set(programmers[0])
-                self.on_programmer_selected(programmers[0])
         else:
-            self.programmer_menu.add_command(
-                label="No programmers found", state=tk.DISABLED
-            )
-            self.log_to_console("No programmers found.", "WARNING")
-
-        # If a programmer was previously selected but is no longer in the list, clear selection
-        current_selection = self.selected_programmer_var.get()
-        if current_selection and current_selection not in programmers:
-            self.selected_programmer_var.set("")
-            self.programmer_display_var.set("None Selected")
-            self.operations_controller.set_active_programmer(None)
-            self.log_to_console(
-                f"Previously selected programmer '{current_selection}' not found.",
-                "WARNING",
-            )
-
-    def on_programmer_selected(self, programmer_path):
-        self.operations_controller.set_active_programmer(programmer_path)
-        self.programmer_display_var.set(programmer_path)
-        self.log_to_console(f"Programmer selected: {programmer_path}")
-        self.status_var.set(f"Programmer: {programmer_path}")
-        self.validate_and_enable_execute()
-
-    def update_eprom_list(self):
-        """Fetches and updates the list of supported EPROMs."""
-        eproms = self.operations_controller.get_supported_eproms()
-        if eproms:
-            self.eprom_combobox["values"] = eproms
+            display_text = " (No devices found) "
             if (
-                not self.eprom_var.get() and eproms
-            ):  # Auto-select first if none selected
-                self.eprom_var.set(eproms[0])
-                self.on_eprom_selected(None)  # Trigger selection logic
-            self.log_to_console(f"Supported EPROMs loaded: {', '.join(eproms)}")
-        else:
-            self.eprom_combobox["values"] = []
-            self.eprom_var.set("")
-            self.log_to_console("No EPROMs loaded from library.", "WARNING")
-
-    def on_eprom_selected(self, event):
-        """Handles EPROM selection from the combobox."""
-        selected_eprom = self.eprom_var.get()
-        if selected_eprom:
-            self.operations_controller.set_active_eprom(selected_eprom)
-            self.log_to_console(f"EPROM type selected: {selected_eprom}")
-            self.status_var.set(
-                f"EPROM: {selected_eprom}, Programmer: {self.selected_programmer_var.get() or 'None'}"
+                devices
+                and isinstance(devices, list)
+                and devices[0]
+                and isinstance(devices[0], str)
+            ):  # If devices list exists and has content (e.g. error message)
+                display_text = f" ({devices[0]}) "
+            self.select_device_submenu.add_command(
+                label=display_text, state=tk.DISABLED
             )
-        self.validate_and_enable_execute()
 
-    def select_operation(self, operation_key):
-        """Sets the current operation and updates the options panel (FR-003)."""
-        self.current_operation = operation_key
-        self.status_var.set(f"Operation: {operation_key.replace('_', ' ').title()}")
-        self.log_to_console(f"Selected operation: {operation_key}")
+            # If a device was selected but now none are found/valid
+            if self.selected_device.get() != "None":
+                self._set_selected_device(
+                    "None"
+                )  # This will update UI and save "None" to config
 
+    def _set_selected_device(self, device_port):
+        self.selected_device.set(device_port)
+        self._log_to_console(f"Programmer device selected: {device_port}")
+        self._update_status_bar(f"Device selected: {device_port}")
+        self.config_manager.set_value(self.LAST_DEVICE_CONFIG_KEY, device_port)
+        if (
+            self.current_operation
+        ):  # Refresh options panel if a device is selected/changed
+            self._update_operation_options_panel(self.current_operation)
+
+    def _on_about(self):
+        messagebox.showinfo(
+            "About Firestarter UI",
+            f"Firestarter UI\nVersion {ui_version}\n\n"
+            f"Firestarter programmer library (v{firestarter_version}).",
+        )
+
+    def _open_preferences(self):
+        dialog = PreferencesDialog(self, self.config_manager)
+        dialog.grab_set()  # Make modal
+        dialog.wait_window(dialog)  # Wait for it to close
+
+        # After preferences are closed, reload the settings into the app's BooleanVars
+        # This ensures the running app reflects the saved preferences immediately.
+        self.verbose_logging.set(
+            self.config_manager.get_value(self.VERBOSE_LOGGING_CONFIG_KEY, default=False)
+        )
+        self.debug_logging.set(
+            self.config_manager.get_value(self.DEBUG_LOGGING_CONFIG_KEY, default=False)
+        )
+
+        # After preferences are closed, re-apply any changes, e.g., verbose logging
+        self._update_logging_level()
+        self._log_to_console("Preferences updated.", "INFO")
+
+    def _on_closing(self):
+        """Handles window close events to save geometry."""
+        current_geometry = self.geometry()
+        logging.debug(f"Saving window geometry: {current_geometry}")
+        self.config_manager.set_value(self.WINDOW_GEOMETRY_CONFIG_KEY, current_geometry)
+        self.destroy()  # Properly close the Tkinter window
+
+    def _select_operation(self, operation_name: str, set_default: bool = True):
+        self.current_operation = operation_name
+        if set_default:
+            self.config_manager.set_value(self.LAST_OPERATION_CONFIG_KEY, operation_name)
+        # self._log_to_console(
+        #     f"Operation selected: {operation_name.replace('_', ' ').title()}"
+        # )
+        self._update_operation_options_panel(operation_name)
+        self._update_status_bar(
+            f"Selected operation: {operation_name.replace('_', ' ').title()}"
+        )
+
+    def _update_operation_options_panel(self, operation_name: str):
         # Clear previous options
         for widget in self.options_panel_frame.winfo_children():
             widget.destroy()
-        self.operation_params_widgets = {}
 
-        # Populate new options based on operation_key
-        # This is where FR-003 (Operation Options Panel) is dynamically built
-        row_idx = 0
-        if operation_key == "read":
-            self._add_file_option("Output File:", "output_file", "save", row_idx)
-            row_idx += 1
-            self._add_text_option("Start Address (hex):", "start_address", row_idx)
-            row_idx += 1
-            self._add_text_option("End Address (hex):", "end_address", row_idx)
-            row_idx += 1
-            self._add_text_option("Size (bytes, hex/dec):", "size", row_idx)
-            row_idx += 1
-        elif operation_key == "write":
-            self._add_file_option("Input File:", "input_file", "open", row_idx)
-            row_idx += 1
-            self._add_text_option("Start Address (hex):", "start_address", row_idx)
-            row_idx += 1
-            self._add_checkbox_option("Verify Write", "verify_write", True, row_idx)
-            row_idx += 1
-        elif operation_key == "verify":
-            self._add_file_option("Input File:", "input_file", "open", row_idx)
-            row_idx += 1
-            self._add_text_option("Start Address (hex):", "start_address", row_idx)
-            row_idx += 1
-        elif operation_key in ["erase", "check_id", "blank_check"]:
+        if self.selected_device.get() == "None":
             ttk.Label(
-                self.options_panel_frame, text="No specific options for this operation."
-            ).grid(row=row_idx, column=0, columnspan=2, pady=5)
+                self.options_panel_frame,
+                text="Please select a programmer device first.",
+            ).pack(padx=5, pady=5)
+            return
+
+        # EPROM type is required for most operations
+        eprom_required_ops = [
+            "read",
+            "write",
+            "verify",
+            "erase",
+            "check_id",
+            "blank_check",
+        ]
+        if (
+            operation_name in eprom_required_ops
+            and self.selected_eprom_type.get() == "None"
+        ):
+            ttk.Label(
+                self.options_panel_frame, text="Please select an EPROM type first."
+            ).pack(padx=5, pady=5)
+            return
+
+        PanelClass = OPERATION_PANELS.get(operation_name)
+
+        if PanelClass:
+            self.current_operation_panel = PanelClass(
+                self.options_panel_frame, app_instance=self
+            )
+            self.current_operation_panel.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         else:
             ttk.Label(
-                self.options_panel_frame, text="Operation not yet configured."
-            ).grid(row=row_idx, column=0, columnspan=2, pady=5)
+                self.options_panel_frame,
+                text=f"Options for '{operation_name}' not yet implemented.",
+            ).pack()
+            self.current_operation_panel = None
+            return  # No execute button for unimplemented
 
-        self.validate_and_enable_execute()
-
-    def _add_text_option(self, label_text, param_key, row_idx, default_value=""):
-        ttk.Label(self.options_panel_frame, text=label_text).grid(
-            row=row_idx, column=0, sticky=tk.W, padx=5, pady=2
+        # FR-007: Execute Button
+        self.execute_button = ttk.Button(
+            self.options_panel_frame,
+            text=f"{operation_name.replace('_', ' ').title()}",
+            command=self._on_execute_operation,
         )
-        entry = ttk.Entry(self.options_panel_frame, width=40)
-        entry.insert(0, default_value)
-        entry.grid(row=row_idx, column=1, sticky=tk.EW, padx=5, pady=2)
-        self.operation_params_widgets[param_key] = entry
-        self.options_panel_frame.columnconfigure(1, weight=1)  # Make entry expandable
+        self.execute_button.pack(pady=10)
 
-    def _add_file_option(self, label_text, param_key, dialog_type, row_idx):
-        ttk.Label(self.options_panel_frame, text=label_text).grid(
-            row=row_idx, column=0, sticky=tk.W, padx=5, pady=2
-        )
-        entry_var = tk.StringVar()
-        entry = ttk.Entry(self.options_panel_frame, textvariable=entry_var, width=30)
-        entry.grid(row=row_idx, column=1, sticky=tk.EW, padx=5, pady=2)
-
-        browse_cmd = lambda: self.browse_file(entry_var, dialog_type)
-        ttk.Button(self.options_panel_frame, text="Browse...", command=browse_cmd).grid(
-            row=row_idx, column=2, padx=5, pady=2
-        )
-
-        self.operation_params_widgets[param_key] = entry_var
-        self.options_panel_frame.columnconfigure(1, weight=1)  # Make entry expandable
-
-    def _add_checkbox_option(self, label_text, param_key, default_checked, row_idx):
-        var = tk.BooleanVar(value=default_checked)
-        chk = ttk.Checkbutton(self.options_panel_frame, text=label_text, variable=var)
-        chk.grid(row=row_idx, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
-        self.operation_params_widgets[param_key] = var
-
-    def browse_file(self, entry_var, dialog_type):
-        """Handles file browsing (FR-008)."""
-        if dialog_type == "open":
-            filepath = filedialog.askopenfilename(title="Select Input File")
-        elif dialog_type == "save":
-            filepath = filedialog.asksaveasfilename(title="Select Output File")
-        else:
-            return
-
-        if filepath:
-            entry_var.set(filepath)
-            self.log_to_console(f"File selected: {filepath}")
-
-    def validate_and_enable_execute(self):
-        """Checks if conditions are met to enable the Execute button."""
-        # Basic validation: operation selected, programmer selected.
-        # EPROM type might be optional for some lib functions but generally required for EPROM ops.
-        op_selected = bool(self.current_operation)
-        programmer_selected = bool(self.selected_programmer_var.get())
-        eprom_selected = bool(self.eprom_var.get())
-
-        # More specific validation can be added here based on self.current_operation
-        # For now, enable if an operation is chosen and programmer/EPROM are set.
-        can_execute = False
-        if op_selected and programmer_selected:
-            # Operations that don't strictly need an EPROM type (e.g., check_id might work on programmer)
-            if self.current_operation in ["check_id"]:  # Add other such ops if any
-                can_execute = True
-            elif eprom_selected:  # Most operations need an EPROM type
-                can_execute = True
-
-        if can_execute:
-            self.execute_button.config(state=tk.NORMAL)
-        else:
-            self.execute_button.config(state=tk.DISABLED)
-
-    def execute_current_operation(self):
-        """Gathers parameters and calls the appropriate method in firestarter_operations."""
-        if not self.current_operation:
-            messagebox.showerror("Error", "No operation selected.")
-            return
-
-        params = {}
-        valid_input = True
-        for key, widget_or_var in self.operation_params_widgets.items():
-            if isinstance(widget_or_var, tk.StringVar) or isinstance(
-                widget_or_var, tk.BooleanVar
-            ):
-                params[key] = widget_or_var.get()
-            elif isinstance(widget_or_var, ttk.Entry):  # Direct entry widget
-                params[key] = widget_or_var.get()
-
-            # Basic Input Validation (FR - mentioned in summary)
-            if key in ["input_file", "output_file"] and not params[key]:
-                messagebox.showerror(
-                    "Input Error", f"{key.replace('_', ' ').title()} is required."
-                )
-                valid_input = False
-                break
-            # Add more specific validation (e.g., for hex addresses) as needed
-
-        if not valid_input:
-            return
-
-        self.log_to_console(
-            f"Executing {self.current_operation} with params: {params}", "DEBUG"
-        )
-        self.execute_button.config(state=tk.DISABLED)  # Disable during operation
-        self.status_var.set(f"Executing {self.current_operation}...")
-
-        # Delegate to FirestarterController
-        op_func_map = {
-            "read": self.operations_controller.read_from_eprom,
-            "write": self.operations_controller.write_to_eprom,
-            "verify": self.operations_controller.verify_eprom_data,
-            "erase": self.operations_controller.erase_selected_eprom,
-            "check_id": self.operations_controller.check_eprom_chip_id,
-            "blank_check": self.operations_controller.perform_blank_check,
-        }
-
-        if self.current_operation in op_func_map:
-            target_method = op_func_map[self.current_operation]
-            if self.current_operation in [
-                "erase",
-                "check_id",
-                "blank_check",
-            ]:  # Ops without params dict
-                target_method()
-            else:
-                target_method(params)
-        else:
-            messagebox.showerror(
-                "Error", f"Operation '{self.current_operation}' not implemented."
-            )
-            self.execute_button.config(state=tk.NORMAL)  # Re-enable if not implemented
-            self.status_var.set("Ready")
-
-    def handle_operation_update(self, update_type, data):
-        """
-        Callback for FirestarterController to send updates to the UI.
-        This method is designed to be called from the main Tkinter thread.
-        The operations controller uses root.after or a queue to ensure this.
-        """
-        if update_type == "log":
-            self.log_to_console(data["message"], data["level"])
-        elif update_type == "check_queue":
-            # This is a signal to process the queue, actual data is in the queue
-            # This is useful if the controller puts multiple items before signaling
-            pass  # The process_operation_queue will handle it
-        elif update_type.endswith("_result"):
-            # This path can be used if controller directly calls back for simple/sync results
-            # However, for threaded ops, queue is preferred.
-            # For now, results are expected via the queue.
-            self.log_to_console(
-                f"Direct update (should be via queue for async): {update_type} - {data}",
-                "DEBUG",
-            )
-            self._process_operation_result(update_type, data)
-
-    def process_operation_queue(self):
-        """Processes messages from the FirestarterController's queue."""
-        try:
-            while not self.operations_controller.operation_queue.empty():
-                message = self.operations_controller.operation_queue.get_nowait()
-                update_type = message.get("type")
-                data = message.get("data")
-
-                if update_type and data:
-                    self._process_operation_result(update_type, data)
-                else:
-                    self.log_to_console(
-                        f"Malformed message from queue: {message}", "ERROR"
-                    )
-        except Exception as e:
-            self.log_to_console(f"Error processing operation queue: {e}", "ERROR")
-        finally:
-            # Reschedule to keep polling
-            self.root.after(100, self.process_operation_queue)
-
-    def _process_operation_result(self, op_type_result, data):
-        """Handles the result of an operation."""
-        self.log_to_console(f"Result for {op_type_result}: {data}", "INFO")
-        status = data.get("status", "error")
-        message = data.get("message", "Unknown outcome.")
-
-        if status == "success":
-            self.log_to_console(
-                f"Operation {op_type_result.replace('_result','')} Succeeded: {message}",
-                "SUCCESS",
-            )
-            if "chip_id" in data:  # Specific for check_id
-                self.log_to_console(
-                    f"Chip ID: {data['chip_id']}, Manufacturer: {data.get('manufacturer', 'N/A')}",
-                    "RESULT",
-                )
-            if "is_blank" in data:  # Specific for blank_check
-                self.log_to_console(
-                    f"Blank Check: {'Chip is Blank.' if data['is_blank'] else message}",
-                    "RESULT",
-                )
-            if op_type_result == "read_result" and "bytes_read" in data:
-                self.log_to_console(f"Bytes Read: {data['bytes_read']}", "RESULT")
-
-            messagebox.showinfo(
-                "Success",
-                f"Operation {op_type_result.replace('_result','')} successful.\n{message}",
-            )
-        else:  # error or failure
-            self.log_to_console(
-                f"Operation {op_type_result.replace('_result','')} Failed: {message}",
-                "ERROR",
-            )
-            messagebox.showerror(
-                "Operation Failed", f"An error occurred: {message}"
-            )  # FR-013
-
-        self.status_var.set("Ready")
-        self.validate_and_enable_execute()  # Re-evaluate execute button state
-
-    def show_about_dialog(self):
-        """Displays the About dialog."""
-        messagebox.showinfo(
-            "About Firestarter UI",
-            "Firestarter UI\nVersion 0.1.0\n\n"
-            "A graphical interface for the Firestarter EPROM programmer library.",
-        )
-
-
-class UITextViewHandler(logging.Handler):
-    """A logging handler that directs messages to the Tkinter Text widget."""
-
-    def __init__(self, app_instance):
-        super().__init__()
-        self.app_instance = app_instance
-
-    def emit(self, record):
-        msg = self.format(record)
-        # Ensure UI update is done in the main thread
-        # The logger might be called from a worker thread
-        self.app_instance.root.after(
-            0, self.app_instance.log_to_console, msg, record.levelname
-        )
-
-
-if __name__ == "__main__":
-    # This is for testing ui_manager.py independently if needed,
-    # but the main entry is firestarter_gui_app.py
-    root = tk.Tk()
-    app = FirestarterApp(root)
-    root.mainloop()
+    def _on_execute_operation(self):

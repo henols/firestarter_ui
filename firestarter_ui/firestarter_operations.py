@@ -1,272 +1,369 @@
-# firestarter_operations.py
+# firestarter_ui/firestarter_operations.py
 """
 Handles interactions with the Firestarter library.
 
 This module abstracts the Firestarter library calls, executes them in
-non-blocking threads, and uses callbacks to send results/errors
-to the ui_manager.py for UI updates.
-"""
-
-import time
+non-blocking threads, and uses callbacks to send results or errors
+back to the ui_manager.
 import threading
 import logging
 from queue import Queue
 
-# --- Mock Firestarter Library (Remove or replace with actual import) ---
-# Assume 'firestarter' is an installed package:
-# from firestarter import Firestarter as ActualFirestarter
+# Import the firestarter library components
+from firestarter.eprom_operations import (
+    EpromOperator,
+    EpromOperationError,
+    build_flags as fs_build_flags,
+)
+from firestarter.hardware import HardwareManager, HardwareOperationError
+from firestarter.firmware import FirmwareManager, FirmwareOperationError
+from firestarter.config import ConfigManager
+from firestarter.main import allowed_eproms as fs_allowed_eproms  # For EPROM list
+from firestarter.constants import (
+    FLAG_FORCE,
+    FLAG_SKIP_BLANK_CHECK,
+    FLAG_SKIP_ERASE,
+    FLAG_VPE_AS_VPP,
+)
+from firestarter.database import EpromDatabase
+
+# If this module is imported, we assume the Firestarter library is available.
+FIRESTARTER_AVAILABLE = True
 
 
-class MockFirestarterLib:
+class FirestarterOperations:
     """
-    A mock class simulating the Firestarter 1.4.x library.
-    Replace this with the actual Firestarter library import and usage.
-    """
-
-    def __init__(self, programmer_device=None, eprom_type=None):
-        self.programmer_device = programmer_device
-        self.eprom_type = eprom_type
-        self.logger = logging.getLogger("MockFirestarterLib")
-        self.logger.info(
-            f"MockFirestarterLib initialized. Programmer: {programmer_device}, EPROM: {eprom_type}"
-        )
-
-    def list_programmers(self):
-        self.logger.info("Listing programmers...")
-        time.sleep(0.5)  # Simulate hardware scan
-        return ["/dev/ttyUSB0 (Mock)", "/dev/ttyUSB1 (Mock)", "COM3 (Mock)"]
-
-    def list_eproms(self):
-        self.logger.info("Listing EPROMs...")
-        return ["27C256", "27C512", "AT28C256"]
-
-    def set_programmer(self, device_path):
-        self.programmer_device = device_path
-        self.logger.info(f"Programmer set to: {device_path}")
-        return True
-
-    def set_eprom(self, eprom_name):
-        self.eprom_type = eprom_name
-        self.logger.info(f"EPROM type set to: {eprom_name}")
-        return True
-
-    def read_eprom(self, output_file, start_address=None, end_address=None, size=None):
-        self.logger.info(
-            f"Reading EPROM to {output_file} from {self.programmer_device} (EPROM: {self.eprom_type})"
-        )
-        self.logger.info(
-            f"Params: start={start_address}, end={end_address}, size={size}"
-        )
-        time.sleep(2)  # Simulate operation
-        # In a real scenario, this would return actual data or status
-        return {
-            "status": "success",
-            "message": f"EPROM read successfully to {output_file}",
-            "bytes_read": size or 256,
-        }
-
-    def write_eprom(self, input_file, start_address=None, verify_write=True):
-        self.logger.info(
-            f"Writing {input_file} to EPROM on {self.programmer_device} (EPROM: {self.eprom_type})"
-        )
-        self.logger.info(f"Params: start={start_address}, verify={verify_write}")
-        time.sleep(3)  # Simulate operation
-        return {
-            "status": "success",
-            "message": f"{input_file} written and verified successfully.",
-        }
-
-    def verify_eprom(self, input_file, start_address=None):
-        self.logger.info(
-            f"Verifying EPROM with {input_file} on {self.programmer_device} (EPROM: {self.eprom_type})"
-        )
-        self.logger.info(f"Params: start={start_address}")
-        time.sleep(1.5)
-        return {"status": "success", "message": "Verification successful."}
-
-    def erase_eprom(self):
-        self.logger.info(
-            f"Erasing EPROM on {self.programmer_device} (EPROM: {self.eprom_type})"
-        )
-        time.sleep(5)  # Simulate long operation
-        return {"status": "success", "message": "EPROM erased successfully."}
-
-    def check_chip_id(self):
-        self.logger.info(f"Checking chip ID on {self.programmer_device}")
-        time.sleep(0.5)
-        return {
-            "status": "success",
-            "chip_id": "0x1234 (Mock ID)",
-            "manufacturer": "Mock Inc.",
-        }
-
-    def blank_check(self):
-        self.logger.info(
-            f"Performing blank check on {self.programmer_device} (EPROM: {self.eprom_type})"
-        )
-        time.sleep(1)
-        # Simulate a non-blank chip for testing
-        # return {"status": "success", "is_blank": True, "message": "Chip is blank."}
-        return {
-            "status": "failure",
-            "is_blank": False,
-            "message": "Chip is not blank at address 0x0010.",
-        }
-
-
-# --- End Mock Firestarter Library ---
-
-
-class FirestarterController:
-    """
-    Controller to manage Firestarter library operations.
+    A class to manage operations using the Firestarter library.
     """
 
-    def __init__(self, ui_update_callback):
-        self.ui_update_callback = ui_update_callback
-        self.firestarter_lib = None
-        self.selected_programmer = None
-        self.selected_eprom = None
-        self.operation_queue = Queue()  # For results from threads
-        self._init_firestarter_library()
+    def __init__(
+        self, ui_queue: Queue, eprom_db: EpromDatabase, config_manager: ConfigManager
+    ):
+        logging.debug("FirestarterOperations.__init__ called.")
+        self.ui_queue = ui_queue
+        self.db = eprom_db  # Store the passed EpromDatabase instance
+        self.config_manager = (
+            config_manager  # Use the ConfigManager instance passed from UIManager
+        )
 
-    def _init_firestarter_library(self):
+        logging.debug(
+            f"Initializing Firestarter components with config type: {type(self.config_manager)}"
+        )
         try:
-            # Replace MockFirestarterLib with the actual Firestarter library class
-            # self.firestarter_lib = ActualFirestarter()
-            self.firestarter_lib = MockFirestarterLib()  # Using mock for now
-            self.log_message("Firestarter library initialized (Mock).", "info")
-        except ImportError:
-            self.firestarter_lib = None
-            self.log_message(
-                "Firestarter library not found. Please install it.", "error"
+            self.eprom_operator = EpromOperator(
+                self.config_manager, progress_callback=self._progress_callback
             )
+            self.hardware_manager = HardwareManager(self.config_manager)
+            self.firmware_manager = FirmwareManager(
+                self.config_manager
+            )  # Pass real config_manager
+            logging.info("Firestarter library components initialized.")
         except Exception as e:
-            self.firestarter_lib = None
-            self.log_message(f"Error initializing Firestarter library: {e}", "error")
+            logging.error(f"Error initializing Firestarter components: {e}")
+            self.ui_queue.put(("error", f"Init Error: {e}"))
+            self.hardware_manager = None
+            self.firmware_manager = None
+        logging.debug("FirestarterOperations.__init__ finished.")
 
-    def log_message(self, message, level="info"):
-        """Sends a log message to the UI via the callback."""
-        # This ensures UI updates happen on the main thread if called from worker
-        self.ui_update_callback("log", {"level": level, "message": message})
+    def _progress_callback(self, current_bytes, total_bytes):
+        """
+        Callback for EPROM operations to report progress.
+        Puts a ('progress', (current, total)) message on the UI queue.
+        """
+        self.ui_queue.put(("progress", (current_bytes, total_bytes)))
 
-    def _execute_operation(self, target_func, op_name, *args, **kwargs):
-        """Executes a Firestarter library function in a separate thread."""
-        if not self.firestarter_lib:
-            self.log_message("Firestarter library not available.", "error")
-            self.ui_update_callback(
-                f"{op_name}_result",
-                {"status": "error", "message": "Library not available."},
-            )
-            return
+    def _execute_in_thread(self, target_func, *args, operation_name="Operation"):
+        """
+        Executes a target function in a new thread.
+        Puts ('status', message) for start/end, ('result', data) for success,
+        or ('error', message) for failure onto the ui_queue.
+        """
+        logging.debug(
+            f"_execute_in_thread: operation_name='{operation_name}', target_func='{target_func.__name__}', args='{args}'"
+        )
 
-        if not self.selected_programmer:
-            self.log_message("No programmer selected.", "error")
-            self.ui_update_callback(
-                f"{op_name}_result",
-                {"status": "error", "message": "Programmer not selected."},
-            )
-            return
-
-        # Some operations might not need an EPROM type (e.g., list_programmers)
-        # but core EPROM ops do.
-        if (
-            op_name not in ["get_programmers", "get_eproms"]
-            and not self.selected_eprom
-            and hasattr(self.firestarter_lib, "set_eprom")
-        ):
-            self.log_message("No EPROM type selected.", "error")
-            self.ui_update_callback(
-                f"{op_name}_result",
-                {"status": "error", "message": "EPROM type not selected."},
-            )
-            return
-
-        # Ensure library instance has current programmer/EPROM
-        if self.selected_programmer and hasattr(self.firestarter_lib, "set_programmer"):
-            self.firestarter_lib.set_programmer(self.selected_programmer)
-        if self.selected_eprom and hasattr(self.firestarter_lib, "set_eprom"):
-            self.firestarter_lib.set_eprom(self.selected_eprom)
-
-        def threaded_task():
+        def threaded_operation():
+            logging.debug(f"Thread for '{operation_name}' started.")
+            self.ui_queue.put(("status", f"{operation_name} started..."))
             try:
-                self.log_message(f"Starting operation: {op_name}", "info")
-                result = target_func(*args, **kwargs)
-                self.operation_queue.put({"type": f"{op_name}_result", "data": result})
-            except Exception as e:
-                self.log_message(f"Error during {op_name}: {e}", "error")
-                self.operation_queue.put(
-                    {
-                        "type": f"{op_name}_result",
-                        "data": {"status": "error", "message": str(e)},
-                    }
+                result = target_func(*args)
+                logging.debug(
+                    f"Thread for '{operation_name}' target_func completed. Result: {result}"
                 )
+                self.ui_queue.put(("result", (operation_name, result)))
+                self.ui_queue.put(
+self.ui_queue.put(("status", f"{operation_name} completed successfully."))
+                )
+            except (
+                EpromOperationError,
+                HardwareOperationError,
+                FirmwareOperationError,
+                Exception,
+            ) as e:
+                logging.error(f"Error during {operation_name}: {e}")
+                self.ui_queue.put(("error", f"{operation_name} failed: {e}"))
             finally:
-                # Signal UI to check queue
-                self.ui_update_callback("check_queue", None)
+                # Signal completion, perhaps for re-enabling UI elements
+                logging.debug(f"Thread for '{operation_name}' finished.")
+                self.ui_queue.put(("operation_finished", operation_name))
 
-        thread = threading.Thread(target=threaded_task, daemon=True)
+        thread = threading.Thread(target=threaded_operation)
+        thread.daemon = True  # Allow main program to exit even if threads are running
         thread.start()
+        logging.debug(
+            f"Thread '{thread.name}' for operation '{operation_name}' launched."
+        )
 
-    # --- Public methods to be called by ui_manager ---
+    def set_logging_level(self, level):
+        """
+        Updates the logging level for both the UI and Firestarter library loggers.
+        """
+        logging.getLogger().setLevel(level)  # Root logger (UI)
+        logging.getLogger("Firestarter").setLevel(
+            level
+        )  # Firestarter library logger
+        logging.debug(f"Logging level set to {logging.getLevelName(level)}.")
 
-    def get_available_programmers(self):
-        if not self.firestarter_lib:
-            return []
-        # This might not need threading if it's quick, or can be wrapped if slow
+    def get_eprom_list(self):
+        """Retrieves the list of EPROMs."""
+        logging.debug("get_eprom_list called.")
         try:
-            return self.firestarter_lib.list_programmers()
+            eproms = fs_allowed_eproms()
+            self.ui_queue.put(("eprom_list", eproms))
         except Exception as e:
-            self.log_message(f"Error listing programmers: {e}", "error")
-            return []
+            self.ui_queue.put(("error", f"Failed to get EPROM list: {e}"))
 
-    def get_supported_eproms(self):
-        if not self.firestarter_lib:
-            return []
-        try:
-            return self.firestarter_lib.list_eproms()
-        except Exception as e:
-            self.log_message(f"Error listing EPROMs: {e}", "error")
-            return []
+    def detect_devices(self):
+        """Detects connected programmer hardware."""
+        logging.debug("detect_devices called.")
+        if not self.hardware_manager:
+            logging.warning("detect_devices: HardwareManager not available.")
+            self.ui_queue.put(("error", "HardwareManager not available."))
+            return
 
-    def set_active_programmer(self, device_path):
-        self.selected_programmer = device_path
-        if self.firestarter_lib and hasattr(self.firestarter_lib, "set_programmer"):
+        def _detect():
+            # The Firestarter library's HardwareManager doesn't have a direct scan_for_programmers.
+            # It typically tries to connect to a preferred/auto-detected port.
+            # For the UI, we might need to list serial ports and let the user select.
+            # This is a placeholder for how device detection might be initiated.
+            # For now, we'll simulate finding some ports.
+            # A real implementation would use serial.tools.list_ports.comports()
+            # and then try to handshake with each.
+            logging.debug("_detect (for detect_devices) started.")
             try:
-                self.firestarter_lib.set_programmer(device_path)
-                self.log_message(f"Active programmer set to: {device_path}", "info")
-            except Exception as e:
-                self.log_message(
-                    f"Error setting programmer {device_path}: {e}", "error"
+                # Placeholder: In a real scenario, you'd use serial.tools.list_ports
+                import serial.tools.list_ports
+
+                logging.debug(
+                    "Attempting to list serial ports using serial.tools.list_ports.comports()"
                 )
-        elif not self.firestarter_lib:
-            self.log_message("Cannot set programmer, library not initialized.", "error")
+                ports = []
+                system_ports = serial.tools.list_ports.comports()
+                for p in system_ports:
+                    if p.device not in ports:  # Avoid duplicates
+                        # Common keywords for Arduino, FTDI, CH340, etc.
+                        # if p.manufacturer and ( # This is the completed line
+                        #         "Arduino" in p.manufacturer
+                        #         or "FTDI" in p.manufacturer
+                        #         or "CH340" in p.manufacturer
+                        #     ) or (p.description and "USB Serial" in p.description):
+                        ports.append(p.device)
 
-    def set_active_eprom(self, eprom_name):
-        self.selected_eprom = eprom_name
-        if self.firestarter_lib and hasattr(self.firestarter_lib, "set_eprom"):
-            try:
-                self.firestarter_lib.set_eprom(eprom_name)
-                self.log_message(f"Active EPROM set to: {eprom_name}", "info")
+                logging.debug(f"Detected ports: {ports}")
+                if not ports:
+                    ports = ["No programmers found"]
             except Exception as e:
-                self.log_message(f"Error setting EPROM {eprom_name}: {e}", "error")
-        elif not self.firestarter_lib:
-            self.log_message("Cannot set EPROM, library not initialized.", "error")
+                ports = [f"Error detecting: {e}"]
+            return ports
 
-    def read_from_eprom(self, params):
-        self._execute_operation(self.firestarter_lib.read_eprom, "read", **params)
+        self._execute_in_thread(_detect, operation_name="Detect Devices")
 
-    def write_to_eprom(self, params):
-        self._execute_operation(self.firestarter_lib.write_eprom, "write", **params)
+    def _build_operation_flags(
+        self, force=False, blank_check=True, vpe_as_vpp=False
+    ):
+        """Helper to build flags for EPROM operations."""
+        # Mirrors firestarter.eprom_operations.build_flags
+        logging.debug(
+            f"_build_operation_flags: force={force}, blank_check={blank_check}, vpe_as_vpp={vpe_as_vpp}"
+        )
+        # or firestarter.main.build_arg_flags
+        flag_value = fs_build_flags(
+            force=force, blank_check=blank_check, vpe_as_vpp=vpe_as_vpp
+        )
+        logging.debug(
+            f"_build_operation_flags: returning flag_value={flag_value:02x}")
+        return flag_value
 
-    def verify_eprom_data(self, params):
-        self._execute_operation(self.firestarter_lib.verify_eprom, "verify", **params)
+    def read_eprom(
+        self,
+        eprom_name: str,
+        eprom_data: dict,
+        output_file: str,
+        address: str,
+        length: str,
+        force: bool = False,
+    ):
+        logging.debug(
+            f"read_eprom: eprom_name='{eprom_name}', output_file='{output_file}', address='{address}', length='{length}', force={force}, eprom_data provided."
+        )
 
-    def erase_selected_eprom(self):
-        self._execute_operation(self.firestarter_lib.erase_eprom, "erase")
+        if not eprom_data:
+            logging.error(
+                f"read_eprom: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
+        flags = self._build_operation_flags(
+            force=force
+        )
+        logging.debug(f"read_eprom: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.read_eprom,
+            eprom_name,
+            eprom_data,
+            output_file,
+            flags,
+            address,
+            length,
+            operation_name="Read",
+        )
 
-    def check_eprom_chip_id(self):
-        self._execute_operation(self.firestarter_lib.check_chip_id, "check_id")
+    def write_eprom(
+        self,
+        eprom_name: str,
+        eprom_data: dict,
+        input_file: str,
+        address: str,
+        force: bool = False,
+        blank_check: bool = True,
+    ):
+        logging.debug(
+            f"write_eprom: eprom_name='{eprom_name}', input_file='{input_file}', address='{address}', force={force}, blank_check={blank_check}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"write_eprom: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
 
-    def perform_blank_check(self):
-        self._execute_operation(self.firestarter_lib.blank_check, "blank_check")
+        flags = self._build_operation_flags(
+            force=force, blank_check=blank_check
+        )
+        logging.debug(f"write_eprom: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.write_eprom,
+            eprom_name, # Corrected typo here
+            eprom_data,
+            input_file,
+            flags,
+            address,
+            operation_name="Write",
+        )
+
+    def blank_check_eprom(self, eprom_name: str, eprom_data: dict, force: bool = False):
+        logging.debug(
+            f"blank_check_eprom: eprom_name='{eprom_name}', force={force}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"blank_check_eprom: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
+        flags = self._build_operation_flags(force=force)
+        logging.debug(f"blank_check_eprom: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.check_eprom_blank,
+            eprom_name,
+            eprom_data,
+            flags,
+            operation_name="Blank Check",
+        )
+
+    def verify_eprom(
+        self,
+        eprom_name: str,
+        eprom_data: dict,
+        input_file: str,
+        address: str,
+        force: bool = False,
+    ):
+
+        logging.debug(
+            f"Verify_eprom: eprom_name='{eprom_name}', force={force}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"verify_eprom: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
+        flags = self._build_operation_flags(force=force)
+        logging.debug(f"verify_eprom: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.verify_eprom,
+            eprom_name,
+            eprom_data,
+            input_file,
+            flags,
+            address,
+            operation_name="Verify",
+        )
+
+    def check_eprom_id(self, eprom_name: str, eprom_data: dict, force: bool = False):
+        logging.debug(
+            f"check_eprom_id: eprom_name='{eprom_name}', force={force}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"check_eprom_id: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
+        flags = self._build_operation_flags(force=force)
+        logging.debug(f"check_eprom_id: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.check_eprom_id,
+            eprom_name,
+            eprom_data,
+            flags,
+            operation_name="Chip Id",
+        )
+
+    def erase_eprom(
+        self,
+        eprom_name: str,
+        eprom_data: dict,
+        blank_check: bool = False,
+        force: bool = False):
+        logging.debug(
+            f"erase_eprom: eprom_name='{eprom_name}', force={force}, blank_check={blank_check}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"check_eprom_id: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
+        flags = self._build_operation_flags(force=force, blank_check=blank_check)
+        logging.debug(f"erase_eprom: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.erase_eprom,
+            eprom_name,
+            eprom_data,
+            flags,
+            operation_name="Erase",
+        )

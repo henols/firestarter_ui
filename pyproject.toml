@@ -1,32 +1,60 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=45",  "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools_scm]
+
 [project]
-name = "firestarter_ui"
-version = "0.1.0"
+name = "firestarter-ui"
 authors = [
-  { name="AI Assistant", email="assist@example.com" },
+  { name="Henrik Olsson", email="henols@gmail.com" },
 ]
-description = "A TKinter UI for the Firestarter EPROM programmer library."
-# readme = "README.md" # Optional: Add a README file
-requires-python = ">=3.8"
+description = "UI for the Firestarter EPROM programmer library."
+readme = { file = "README.md", content-type = "text/markdown" }
+dynamic = ["version"]
+
+requires-python = ">=3.9"
+keywords = [
+    "firestarter",
+    "eprom",
+    "rom",
+    "eeprom",
+    "flash",
+    "programmer",
+    "arduino",
+    "electronics",
+    "retro computing",
+    "retro game console",
+    "commodore",
+    "atari",
+    "apple",
+    "c64",
+    "nes",
+]
+
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License", # Assuming MIT, change if needed
-    "Operating System :: OS Independent",
-    "Development Status :: 3 - Alpha",
-    "Environment :: Win32 (MS Windows)",
-    "Environment :: MacOS X",
-    "Environment :: X11 Applications",
+    "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: End Users/Desktop",
-    "Topic :: Desktop Environment",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Embedded Systems",
     "Topic :: System :: Hardware :: Hardware Drivers",
 ]
+
 dependencies = [
-    "firestarter>=1.4.6"
+    "firestarter>=2.0.2"
 ]
+urls = { "Homepage" = "https://github.com/henols/firestarter_ui" }
 
 [project.scripts]
 firestarter-ui = "firestarter_ui.main_app:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "firestarter.__version__"}

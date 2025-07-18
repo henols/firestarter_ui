@@ -1,1 +1,1 @@
-firestarter>=1.4.6
+firestarter>=2.0.0
