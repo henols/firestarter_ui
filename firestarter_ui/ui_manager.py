@@ -808,7 +808,7 @@ class FirestarterApp(tk.Tk):
 
         if eprom_name != "None":
             full_eprom_data = self.db.get_eprom(eprom_name)
-            if not full_eprom_data:  # If not found in DB
+            if not full_eprom_data: 
                 messagebox.showerror(
                     "Error", f"EPROM '{eprom_name}' not found in database."
                 )
