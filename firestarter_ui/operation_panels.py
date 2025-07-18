@@ -212,7 +212,7 @@ class WriteOperationPanel(BaseOperationPanel):
             input_file,
             address,
             force,
-            perform_blank_check=(not ignore_blank_check),
+blank_check=(not ignore_blank_check),
         )
         return True  # Operation initiated
 
