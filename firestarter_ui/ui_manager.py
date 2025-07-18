@@ -315,7 +315,11 @@ class FirestarterApp(tk.Tk):
 
     def _update_logging_level(self):
         """Updates the application's logging level based on the verbose flag."""
-        log_level = logging.DEBUG if  not self.debug_logging == None and self.debug_logging.get() else logging.INFO
+        log_level = (
+            logging.DEBUG
+            if not self.debug_logging == None and self.debug_logging.get()
+            else logging.INFO
+        )
         logging.getLogger().setLevel(log_level)  # For UI logs
 
         # Also update the level in firestarter_operations
@@ -670,7 +674,9 @@ class FirestarterApp(tk.Tk):
         # After preferences are closed, reload the settings into the app's BooleanVars
         # This ensures the running app reflects the saved preferences immediately.
         self.verbose_logging.set(
-            self.config_manager.get_value(self.VERBOSE_LOGGING_CONFIG_KEY, default=False)
+            self.config_manager.get_value(
+                self.VERBOSE_LOGGING_CONFIG_KEY, default=False
+            )
         )
         self.debug_logging.set(
             self.config_manager.get_value(self.DEBUG_LOGGING_CONFIG_KEY, default=False)
@@ -690,7 +696,9 @@ class FirestarterApp(tk.Tk):
     def _select_operation(self, operation_name: str, set_default: bool = True):
         self.current_operation = operation_name
         if set_default:
-            self.config_manager.set_value(self.LAST_OPERATION_CONFIG_KEY, operation_name)
+            self.config_manager.set_value(
+                self.LAST_OPERATION_CONFIG_KEY, operation_name
+            )
         # self._log_to_console(
         #     f"Operation selected: {operation_name.replace('_', ' ').title()}"
         # )
@@ -806,9 +814,7 @@ class FirestarterApp(tk.Tk):
                 )
                 return
             try:
-                eprom_data = self.db.convert_to_programmer(
-                    full_eprom_data
-                )  # Use firestarter_ops.db
+                eprom_data = self.db.convert_to_programmer(full_eprom_data)
             except Exception as e_conv:
                 messagebox.showerror(
                     "Error", f"Error preparing EPROM data for '{eprom_name}': {e_conv}"
@@ -862,4 +868,3 @@ class FirestarterApp(tk.Tk):
             logging.error(f"Unexpected error executing {self.current_operation}: {e}")
             if hasattr(self, "execute_button") and self.execute_button:
                 self.execute_button.config(state=tk.NORMAL)
-
