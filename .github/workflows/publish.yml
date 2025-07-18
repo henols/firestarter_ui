@@ -16,5 +16,5 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           # Remove after testing ----------------------------------------------------
-          repository-url: https://test.pypi.org/legacy/
+          # repository-url: https://test.pypi.org/legacy/
 
