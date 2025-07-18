@@ -57,4 +57,4 @@ urls = { "Homepage" = "https://github.com/henols/firestarter_ui" }
 firestarter-ui = "firestarter_ui.main_app:main"
 
 [tool.setuptools.dynamic]
-version = {attr = "firestarter.__version__"}
+version = {attr = "firestarter_ui.__version__"}
