@@ -15,6 +15,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
-          # Remove after testing ----------------------------------------------------
+          # Remove after testing 
           # repository-url: https://test.pypi.org/legacy/
 
