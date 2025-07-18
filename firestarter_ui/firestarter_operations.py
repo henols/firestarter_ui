@@ -11,13 +11,20 @@ import logging
 from queue import Queue
 
 # Import the firestarter library components
-from firestarter.eprom_operations import EpromOperator, EpromOperationError, build_flags as fs_build_flags
+from firestarter.eprom_operations import (
+    EpromOperator,
+    EpromOperationError,
+    build_flags as fs_build_flags,
+)
 from firestarter.hardware import HardwareManager, HardwareOperationError
 from firestarter.firmware import FirmwareManager, FirmwareOperationError
 from firestarter.config import ConfigManager
-from firestarter.main import allowed_eproms as fs_allowed_eproms # For EPROM list
+from firestarter.main import allowed_eproms as fs_allowed_eproms  # For EPROM list
 from firestarter.constants import (
-    FLAG_FORCE, FLAG_SKIP_BLANK_CHECK, FLAG_SKIP_ERASE, FLAG_VPE_AS_VPP
+    FLAG_FORCE,
+    FLAG_SKIP_BLANK_CHECK,
+    FLAG_SKIP_ERASE,
+    FLAG_VPE_AS_VPP,
 )
 from firestarter.database import EpromDatabase
 
@@ -29,17 +36,28 @@ class FirestarterOperations:
     """
     A class to manage operations using the Firestarter library.
     """
-    def __init__(self, ui_queue: Queue, eprom_db: EpromDatabase, config_manager: ConfigManager):
+
+    def __init__(
+        self, ui_queue: Queue, eprom_db: EpromDatabase, config_manager: ConfigManager
+    ):
         logging.debug("FirestarterOperations.__init__ called.")
         self.ui_queue = ui_queue
-        self.db = eprom_db # Store the passed EpromDatabase instance
-        self.config_manager = config_manager # Use the ConfigManager instance passed from UIManager
+        self.db = eprom_db  # Store the passed EpromDatabase instance
+        self.config_manager = (
+            config_manager  # Use the ConfigManager instance passed from UIManager
+        )
 
-        logging.debug(f"Initializing Firestarter components with config type: {type(self.config_manager)}")
+        logging.debug(
+            f"Initializing Firestarter components with config type: {type(self.config_manager)}"
+        )
         try:
-            self.eprom_operator = EpromOperator(self.config_manager, progress_callback=self._progress_callback)
+            self.eprom_operator = EpromOperator(
+                self.config_manager, progress_callback=self._progress_callback
+            )
             self.hardware_manager = HardwareManager(self.config_manager)
-            self.firmware_manager = FirmwareManager(self.config_manager) # Pass real config_manager
+            self.firmware_manager = FirmwareManager(
+                self.config_manager
+            )  # Pass real config_manager
             logging.info("Firestarter library components initialized.")
         except Exception as e:
             logging.error(f"Error initializing Firestarter components: {e}")
@@ -61,18 +79,28 @@ class FirestarterOperations:
         Puts ('status', message) for start/end, ('result', data) for success,
         or ('error', message) for failure onto the ui_queue.
         """
-        logging.debug(f"_execute_in_thread: operation_name='{operation_name}', target_func='{target_func.__name__}', args='{args}'")
+        logging.debug(
+            f"_execute_in_thread: operation_name='{operation_name}', target_func='{target_func.__name__}', args='{args}'"
+        )
+
         def threaded_operation():
             logging.debug(f"Thread for '{operation_name}' started.")
             self.ui_queue.put(("status", f"{operation_name} started..."))
-            print(args)
-            print(type(args ))
             try:
                 result = target_func(*args)
-                logging.debug(f"Thread for '{operation_name}' target_func completed. Result: {result}")
+                logging.debug(
+                    f"Thread for '{operation_name}' target_func completed. Result: {result}"
+                )
                 self.ui_queue.put(("result", (operation_name, result)))
-                self.ui_queue.put(("status", f"{operation_name} completed successfully."))
-            except (EpromOperationError, HardwareOperationError, FirmwareOperationError, Exception) as e:
+                self.ui_queue.put(
+                    ("status", f"{operation_name} completed successfully or did it.")
+                )
+            except (
+                EpromOperationError,
+                HardwareOperationError,
+                FirmwareOperationError,
+                Exception,
+            ) as e:
                 logging.error(f"Error during {operation_name}: {e}")
                 self.ui_queue.put(("error", f"{operation_name} failed: {e}"))
             finally:
@@ -83,15 +111,25 @@ class FirestarterOperations:
         thread = threading.Thread(target=threaded_operation)
         thread.daemon = True  # Allow main program to exit even if threads are running
         thread.start()
-        logging.debug(f"Thread '{thread.name}' for operation '{operation_name}' launched.")
+        logging.debug(
+            f"Thread '{thread.name}' for operation '{operation_name}' launched."
+        )
+
+    def set_logging_level(self, level):
+        """
+        Updates the logging level for both the UI and Firestarter library loggers.
+        """
+        logging.getLogger().setLevel(level)  # Root logger (UI)
+        logging.getLogger("Firestarter").setLevel(
+            level
+        )  # Firestarter library logger
+        logging.debug(f"Logging level set to {logging.getLevelName(level)}.")
 
     def get_eprom_list(self):
         """Retrieves the list of EPROMs."""
         logging.debug("get_eprom_list called.")
         try:
-            logging.debug("Calling fs_allowed_eproms()")
             eproms = fs_allowed_eproms()
-            logging.debug(f"fs_allowed_eproms() returned: {eproms}")
             self.ui_queue.put(("eprom_list", eproms))
         except Exception as e:
             self.ui_queue.put(("error", f"Failed to get EPROM list: {e}"))
@@ -116,7 +154,10 @@ class FirestarterOperations:
             try:
                 # Placeholder: In a real scenario, you'd use serial.tools.list_ports
                 import serial.tools.list_ports
-                logging.debug("Attempting to list serial ports using serial.tools.list_ports.comports()")
+
+                logging.debug(
+                    "Attempting to list serial ports using serial.tools.list_ports.comports()"
+                )
                 ports = []
                 system_ports = serial.tools.list_ports.comports()
                 for p in system_ports:
@@ -127,8 +168,8 @@ class FirestarterOperations:
                         #         or "FTDI" in p.manufacturer
                         #         or "CH340" in p.manufacturer
                         #     ) or (p.description and "USB Serial" in p.description):
-                        ports.append(p.device)        
-                            
+                        ports.append(p.device)
+
                 logging.debug(f"Detected ports: {ports}")
                 if not ports:
                     ports = ["No programmers found"]
@@ -138,98 +179,192 @@ class FirestarterOperations:
 
         self._execute_in_thread(_detect, operation_name="Detect Devices")
 
-    def _build_operation_flags(self, force=False, ignore_blank_check=False, vpe_as_vpp=False):
+    def _build_operation_flags(
+        self, force=False, blank_check=True, vpe_as_vpp=False
+    ):
         """Helper to build flags for EPROM operations."""
-        # This mirrors the logic from firestarter.eprom_operations.build_flags
-        logging.debug(f"_build_operation_flags: force={force}, ignore_blank_check={ignore_blank_check}, vpe_as_vpp={vpe_as_vpp}")
+        # Mirrors firestarter.eprom_operations.build_flags
+        logging.debug(
+            f"_build_operation_flags: force={force}, blank_check={blank_check}, vpe_as_vpp={vpe_as_vpp}"
+        )
         # or firestarter.main.build_arg_flags
-        flag_value = fs_build_flags(force=force, ignore_blank_check=ignore_blank_check, vpe_as_vpp=vpe_as_vpp)
-        logging.debug(f"_build_operation_flags: returning flag_value={flag_value:02x}")
+        flag_value = fs_build_flags(
+            force=force, blank_check=blank_check, vpe_as_vpp=vpe_as_vpp
+        )
+        logging.debug(
+            f"_build_operation_flags: returning flag_value={flag_value:02x}")
         return flag_value
 
-    def read_eprom(self, eprom_name: str, eprom_data: dict, output_file: str, address: str, length: str, force: bool):
-        logging.debug(f"read_eprom: eprom_name='{eprom_name}', output_file='{output_file}', address='{address}', length='{length}', force={force}, eprom_data_for_op provided.")
-        
+    def read_eprom(
+        self,
+        eprom_name: str,
+        eprom_data: dict,
+        output_file: str,
+        address: str,
+        length: str,
+        force: bool = False,
+    ):
+        logging.debug(
+            f"read_eprom: eprom_name='{eprom_name}', output_file='{output_file}', address='{address}', length='{length}', force={force}, eprom_data provided."
+        )
+
         if not eprom_data:
-            logging.error(f"read_eprom: EPROM data for '{eprom_name}' was not provided.")
-            self.ui_queue.put(("error", f"EPROM data for '{eprom_name}' was not provided."))
+            logging.error(
+                f"read_eprom: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
             return
-        flags = self._build_operation_flags(force=force)
+        flags = self._build_operation_flags(
+            force=force
+        )
         logging.debug(f"read_eprom: flags={flags:02x}")
         self._execute_in_thread(
             self.eprom_operator.read_eprom,
-            eprom_name, eprom_data, output_file, flags, address, length,
-            operation_name="Read EPROM"
+            eprom_name,
+            eprom_data,
+            output_file,
+            flags,
+            address,
+            length,
+            operation_name="Read",
         )
 
-    def write_eprom(self, eprom_name: str, eprom_data_for_op: dict, input_file: str, verify_after: bool, address: str, force: bool, ignore_blank: bool):
-        logging.debug(f"write_eprom: eprom_name='{eprom_name}', input_file='{input_file}', verify_after={verify_after}, address='{address}', force={force}, ignore_blank={ignore_blank}, eprom_data_for_op provided.")
-        if not eprom_data_for_op:
-            logging.error(f"write_eprom: EPROM data for '{eprom_name}' was not provided.")
-            self.ui_queue.put(("error", f"EPROM data for '{eprom_name}' was not provided."))
+    def write_eprom(
+        self,
+        eprom_name: str,
+        eprom_data: dict,
+        input_file: str,
+        address: str,
+        force: bool = False,
+        blank_check: bool = True,
+    ):
+        logging.debug(
+            f"write_eprom: eprom_name='{eprom_name}', input_file='{input_file}', address='{address}', force={force}, blank_check={blank_check}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"write_eprom: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
             return
 
-        def threaded_operation():
-            operation_name = "Write EPROM"
-            logging.debug(f"Thread for '{operation_name}' started.")
-            self.ui_queue.put(("status", f"{operation_name} started..."))
-            try:
-                # Phase 1: Blank Check (if not ignored)
-                if not ignore_blank:
-                    self.ui_queue.put(("status", "Performing pre-write blank check..."))
-                    blank_flags = self._build_operation_flags(force=force)
-                    
-                    # This call is blocking but will use the progress_callback
-                    is_blank = self.eprom_operator.check_eprom_blank(
-                        eprom_name, eprom_data_for_op, blank_flags
-                    )
-                    if not is_blank:
-                        # The error is already logged by check_eprom_blank
-                        raise EpromOperationError("EPROM is not blank. Write operation aborted.")
-                
-                # Phase 2: Write
-                self.ui_queue.put(("status", "Blank check complete. Starting write..."))
-                # The blank check is done, so we tell the write op to skip it.
-                write_flags = self._build_operation_flags(force=force, ignore_blank_check=True)
-                
-                # This call is also blocking and uses the progress_callback
-                write_success = self.eprom_operator.write_eprom(
-                    eprom_name, eprom_data_for_op, input_file, write_flags, address
-                )
-                
-                if not write_success:
-                    raise EpromOperationError("EPROM write failed.")
-                
-                self.ui_queue.put(("result", (operation_name, write_success)))
-                self.ui_queue.put(("status", f"{operation_name} completed successfully."))
-            except (EpromOperationError, Exception) as e:
-                logging.error(f"Error during {operation_name}: {e}")
-                self.ui_queue.put(("error", f"{operation_name} failed: {e}"))
-            finally:
-                logging.debug(f"Thread for '{operation_name}' finished.")
-                self.ui_queue.put(("operation_finished", operation_name))
+        flags = self._build_operation_flags(
+            force=force, blank_check=blank_check
+        )
+        logging.debug(f"write_eprom: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.write_eprom,
+            eprom_name, # Corrected typo here
+            eprom_data,
+            input_file,
+            flags,
+            address,
+            operation_name="Write",
+        )
 
-        thread = threading.Thread(target=threaded_operation)
-        thread.daemon = True
-        thread.start()
-        logging.debug(f"Thread '{thread.name}' for operation 'Write EPROM' launched.")
-
-    # ... Implement other operations: verify, erase, check_chip_id, blank_check
-    # For example:
-    def blank_check_eprom(self, eprom_name: str, eprom_data_for_op: dict, force: bool):
-        logging.debug(f"blank_check_eprom: eprom_name='{eprom_name}', force={force}, eprom_data_for_op provided.")
-        if not eprom_data_for_op:
-            logging.error(f"blank_check_eprom: EPROM data for '{eprom_name}' was not provided.")
-            self.ui_queue.put(("error", f"EPROM data for '{eprom_name}' was not provided."))
+    def blank_check_eprom(self, eprom_name: str, eprom_data: dict, force: bool = False):
+        logging.debug(
+            f"blank_check_eprom: eprom_name='{eprom_name}', force={force}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"blank_check_eprom: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
             return
         flags = self._build_operation_flags(force=force)
         logging.debug(f"blank_check_eprom: flags={flags:02x}")
         self._execute_in_thread(
             self.eprom_operator.check_eprom_blank,
-            eprom_name, eprom_data_for_op, flags,
-            operation_name="Blank Check"
+            eprom_name,
+            eprom_data,
+            flags,
+            operation_name="Blank Check",
         )
 
-    # Add stubs for other operations as per PRD
-    # verify_eprom, erase_eprom, check_chip_id
-    # update_firmware, read_vpp, read_vcc (vpe)
+    def verify_eprom(
+        self,
+        eprom_name: str,
+        eprom_data: dict,
+        input_file: str,
+        address: str,
+        force: bool = False,
+    ):
+
+        logging.debug(
+            f"Verify_eprom: eprom_name='{eprom_name}', force={force}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"verify_eprom: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
+        flags = self._build_operation_flags(force=force)
+        logging.debug(f"verify_eprom: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.verify_eprom,
+            eprom_name,
+            eprom_data,
+            input_file,
+            flags,
+            address,
+            operation_name="Verify",
+        )
+
+    def check_eprom_id(self, eprom_name: str, eprom_data: dict, force: bool = False):
+        logging.debug(
+            f"check_eprom_id: eprom_name='{eprom_name}', force={force}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"check_eprom_id: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
+        flags = self._build_operation_flags(force=force)
+        logging.debug(f"check_eprom_id: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.check_eprom_id,
+            eprom_name,
+            eprom_data,
+            flags,
+            operation_name="Chip Id",
+        )
+
+    def erase_eprom(
+        self,
+        eprom_name: str,
+        eprom_data: dict,
+        blank_check: bool = False,
+        force: bool = False):
+        logging.debug(
+            f"erase_eprom: eprom_name='{eprom_name}', force={force}, blank_check={blank_check}, eprom_data provided."
+        )
+        if not eprom_data:
+            logging.error(
+                f"check_eprom_id: EPROM data for '{eprom_name}' was not provided."
+            )
+            self.ui_queue.put(
+                ("error", f"EPROM data for '{eprom_name}' was not provided.")
+            )
+            return
+        flags = self._build_operation_flags(force=force, blank_check=blank_check)
+        logging.debug(f"erase_eprom: flags={flags:02x}")
+        self._execute_in_thread(
+            self.eprom_operator.erase_eprom,
+            eprom_name,
+            eprom_data,
+            flags,
+            operation_name="Erase",
+        )

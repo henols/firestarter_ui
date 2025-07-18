@@ -13,6 +13,9 @@ import os  # Added for path operations
 from pathlib import Path  # Added for path operations
 from queue import Queue
 
+from firestarter import __version__ as firestarter_version
+from firestarter_ui import __version__ as ui_version
+
 from firestarter_ui.firestarter_operations import FirestarterOperations
 from firestarter_ui.operation_panels import OPERATION_PANELS
 
@@ -26,6 +29,84 @@ from firestarter.config import ConfigManager as RealFirestarterConfigManager
 # If these modules are imported, we assume the Firestarter library is available.
 FIRESTARTER_AVAILABLE = True
 FIRESTARTER_CONFIG_AVAILABLE = True
+
+
+class QueueHandler(logging.Handler):
+    """A custom logging handler that sends records to a queue."""
+
+    def __init__(self, queue):
+        super().__init__()
+        self.queue = queue
+
+    def emit(self, record):
+        """
+        Puts the formatted log message into the queue with a specific type.
+        """
+        self.queue.put(("rurp_log", self.format(record)))
+
+
+class PreferencesDialog(tk.Toplevel):
+    def __init__(self, parent, config_manager):
+        super().__init__(parent)
+        self.transient(parent)
+        self.title("Preferences")
+        self.config_manager = config_manager
+
+        # Logging Settings
+        logging_frame = ttk.Frame(self, padding="10")
+        logging_frame.pack(fill=tk.X)
+        self.verbose_logging = tk.BooleanVar(
+            value=self.config_manager.get_value("verbose_logging", default=False)
+        )
+        verbose_check = ttk.Checkbutton(
+            logging_frame,
+            text="Enable Verbose Logging",
+            variable=self.verbose_logging,
+        )
+        verbose_check.pack(anchor=tk.W, pady=(0, 2))
+
+        # Debug Logging Setting
+        self.debug_logging = tk.BooleanVar(
+            value=self.config_manager.get_value("debug_logging", default=False)
+        )
+        debug_check = ttk.Checkbutton(
+            logging_frame,
+            text="Enable Debug Logging",
+            variable=self.debug_logging,
+        )
+        debug_check.pack(anchor=tk.W, pady=2)
+
+        # Add other settings as needed, e.g.,
+        # - Default directory for file operations
+        # - Serial port settings (if not auto-detected)
+        # - UI theme options
+
+        # Example: Default Directory
+        # dir_frame = ttk.Frame(self, padding="10")
+        # dir_frame.pack(fill=tk.X)
+        # ttk.Label(dir_frame, text="Default Directory:").pack(side=tk.LEFT)
+        # self.default_dir = tk.StringVar(value=self.config_manager.get_value("default_dir", default="."))
+        # ttk.Entry(dir_frame, textvariable=self.default_dir).pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        # Buttons
+        button_frame = ttk.Frame(self, padding="10")
+        button_frame.pack(fill=tk.X)
+        ttk.Button(button_frame, text="Save", command=self.save_preferences).pack(
+            side=tk.RIGHT
+        )
+        ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(
+            side=tk.RIGHT, padx=5
+        )
+
+    def save_preferences(self):
+        self.config_manager.set_value("verbose_logging", self.verbose_logging.get())
+        self.config_manager.set_value("debug_logging", self.debug_logging.get())
+        self.destroy()
+
+
+class EpromSearchDialog(tk.Toplevel):
+    def __init__(self, parent, all_eproms, title="Search EPROM"):
+        super().__init__(parent)
 
 
 class EpromSearchDialog(tk.Toplevel):
@@ -131,7 +212,9 @@ class FirestarterApp(tk.Tk):
         self.LAST_EPROM_CONFIG_KEY = "eprom"  # More specific key
         self.LAST_DEVICE_CONFIG_KEY = "device_port"  # More specific key
         self.WINDOW_GEOMETRY_CONFIG_KEY = "window_geometry"
-
+        self.VERBOSE_LOGGING_CONFIG_KEY = "verbose_logging"
+        self.DEBUG_LOGGING_CONFIG_KEY = "debug_logging"
+        self.LAST_OPERATION_CONFIG_KEY = "last_operation"
         # Initialize FirestarterOperations and ConfigManager early to use for geometry
         self.db = EpromDatabase()  # Initialize EpromDatabase instance (db)
 
@@ -182,9 +265,17 @@ class FirestarterApp(tk.Tk):
         self.current_operation_panel = (
             None  # To store the instance of the current operation panel
         )
-        self.verbose_logging = tk.BooleanVar(value=False)
+        saved_verbose_setting = self.config_manager.get_value(
+            self.VERBOSE_LOGGING_CONFIG_KEY, default=False
+        )
+        self.verbose_logging = tk.BooleanVar(value=saved_verbose_setting)
 
-        self._configure_logging()
+        saved_debug_setting = self.config_manager.get_value(
+            self.DEBUG_LOGGING_CONFIG_KEY, default=False
+        )
+        self.debug_logging = tk.BooleanVar(value=saved_debug_setting)
+
+        self._setup_logging()  # Configure basicConfig once.
         self._create_menu()
         self._create_toolbar()  # Placeholder
         self._create_device_eprom_selection_area()
@@ -192,29 +283,46 @@ class FirestarterApp(tk.Tk):
         self._create_status_bar()
 
         self.after(100, self._process_ui_queue)  # Start polling the queue
-
+        self._update_logging_level()  # Init logging level from config
         # Initial population of EPROM list
         self.firestarter_ops.get_eprom_list()
 
         # Handle window close event
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
-        # Set "read" as the default operation panel
-        self._select_operation("read")
+        # Load last selected operation panel, default to "read"
+        last_operation = self.config_manager.get_value(
+            self.LAST_OPERATION_CONFIG_KEY, default="read"
+        )
+        self._select_operation(last_operation, set_default=False)
 
-    def _configure_logging(self):
-        log_level = logging.DEBUG if self.verbose_logging.get() else logging.INFO
+    def _setup_logging(self):
+        """Configures the logging system once at startup."""
+        # This ensures basicConfig is only called once.
         logging.basicConfig(
-            level=log_level, format="%(asctime)s - %(levelname)s - %(message)s"
+            level=logging.INFO,  # Default level, will be updated by _update_logging_level
+            format="%(asctime)s - %(name)-15s - %(levelname)-7s - %(message)s",
         )
-        # Add a handler to also log to our UI console if desired, or rely on queue
 
-    def _toggle_verbose_logging(self):
-        self._configure_logging()
-        self._log_to_console(
-            f"Verbose logging {'enabled' if self.verbose_logging.get() else 'disabled'}.",
-            "INFO",
-        )
+        # Intercept RURP logs from the firestarter library and direct to UI console
+        rurp_logger = logging.getLogger("RURP")
+        queue_handler = QueueHandler(self.ui_queue)
+        # Use a simple formatter that just passes the message through,
+        # as the RURP logger already formats it nicely (e.g., "INFO: Programmer reset").
+        formatter = logging.Formatter("%(message)s")
+        queue_handler.setFormatter(formatter)
+        rurp_logger.addHandler(queue_handler)
+
+    def _update_logging_level(self):
+        """Updates the application's logging level based on the verbose flag."""
+        log_level = logging.DEBUG if  not self.debug_logging == None and self.debug_logging.get() else logging.INFO
+        logging.getLogger().setLevel(log_level)  # For UI logs
+
+        # Also update the level in firestarter_operations
+        if self.firestarter_ops:
+            self.firestarter_ops.set_logging_level(log_level)
+
+        # Add a handler to also log to our UI console if desired, or rely on queue
 
     def _create_menu(self):
         menubar = tk.Menu(self)
@@ -229,12 +337,7 @@ class FirestarterApp(tk.Tk):
             label="Save Configuration...", state=tk.DISABLED
         )  # FR-001.A
         file_menu.add_separator()
-        file_menu.add_checkbutton(
-            label="Verbose Logging",
-            variable=self.verbose_logging,
-            command=self._toggle_verbose_logging,
-        )
-        file_menu.add_command(label="Preferences...", state=tk.DISABLED)
+        file_menu.add_command(label="Preferences...", command=self._open_preferences)
         file_menu.add_separator()
         file_menu.add_command(
             label="Exit", command=self._on_closing
@@ -370,13 +473,11 @@ class FirestarterApp(tk.Tk):
         status_frame = ttk.Frame(self, relief=tk.SUNKEN, padding=0)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
 
-        self.status_bar = ttk.Label(
-            status_frame, text="Status: Ready", anchor=tk.W
-        )
-        self.status_bar.pack(side=tk.LEFT, padx=2) # Removed fill=tk.X, expand=True
+        self.status_bar = ttk.Label(status_frame, text="Status: Ready", anchor=tk.W)
+        self.status_bar.pack(side=tk.LEFT, padx=2)  # Removed fill=tk.X, expand=True
 
         self.progress_bar = ttk.Progressbar(
-            status_frame, orient=tk.HORIZONTAL, mode='determinate'
+            status_frame, orient=tk.HORIZONTAL, mode="determinate"
         )
         # The progress bar will be packed/unpacked as needed, so don't pack it here initially.
 
@@ -418,11 +519,13 @@ class FirestarterApp(tk.Tk):
                 elif msg_type == "progress":
                     current, total = data
                     if not self.progress_bar.winfo_ismapped():
-                        self.progress_bar.pack(side=tk.RIGHT, padx=5, pady=1, fill=tk.X, expand=True)
+                        self.progress_bar.pack(
+                            side=tk.RIGHT, padx=5, pady=1, fill=tk.X, expand=True
+                        )
 
                     if total > 0:
-                        self.progress_bar['maximum'] = total
-                        self.progress_bar['value'] = current
+                        self.progress_bar["maximum"] = total
+                        self.progress_bar["value"] = current
                 elif msg_type == "result":
                     op_name, op_result = data
                     self._log_to_console(f"{op_name} result: {op_result}", "INFO")
@@ -451,6 +554,10 @@ class FirestarterApp(tk.Tk):
                         logging.warning(
                             "Received 'eprom_search_results', but this path might be deprecated."
                         )
+                elif msg_type == "rurp_log":
+                    type, msg = data.split(":")
+                    if not type == "DATA":
+                        self._log_to_console(msg, type)
                 elif msg_type == "operation_finished":
                     # Re-enable UI elements if they were disabled
                     self._update_status_bar(f"{data} finished. Ready.")
@@ -458,7 +565,7 @@ class FirestarterApp(tk.Tk):
                         self.execute_button.config(state=tk.NORMAL)
                     if self.progress_bar.winfo_ismapped():
                         # Ensure it shows 100% before hiding
-                        self.progress_bar['value'] = self.progress_bar['maximum']
+                        self.progress_bar["value"] = self.progress_bar["maximum"]
                         self.progress_bar.after(500, self.progress_bar.pack_forget)
 
         except Exception as e:
@@ -551,9 +658,27 @@ class FirestarterApp(tk.Tk):
     def _on_about(self):
         messagebox.showinfo(
             "About Firestarter UI",
-            "Firestarter UI\nVersion 0.1.0\n\n"
-            "UI for the Firestarter EPROM programmer library.",
+            f"Firestarter UI\nVersion {ui_version}\n\n"
+            f"Firestarter programmer library (v{firestarter_version}).",
         )
+
+    def _open_preferences(self):
+        dialog = PreferencesDialog(self, self.config_manager)
+        dialog.grab_set()  # Make modal
+        dialog.wait_window(dialog)  # Wait for it to close
+
+        # After preferences are closed, reload the settings into the app's BooleanVars
+        # This ensures the running app reflects the saved preferences immediately.
+        self.verbose_logging.set(
+            self.config_manager.get_value(self.VERBOSE_LOGGING_CONFIG_KEY, default=False)
+        )
+        self.debug_logging.set(
+            self.config_manager.get_value(self.DEBUG_LOGGING_CONFIG_KEY, default=False)
+        )
+
+        # After preferences are closed, re-apply any changes, e.g., verbose logging
+        self._update_logging_level()
+        self._log_to_console("Preferences updated.", "INFO")
 
     def _on_closing(self):
         """Handles window close events to save geometry."""
@@ -562,11 +687,13 @@ class FirestarterApp(tk.Tk):
         self.config_manager.set_value(self.WINDOW_GEOMETRY_CONFIG_KEY, current_geometry)
         self.destroy()  # Properly close the Tkinter window
 
-    def _select_operation(self, operation_name: str):
+    def _select_operation(self, operation_name: str, set_default: bool = True):
         self.current_operation = operation_name
-        self._log_to_console(
-            f"Operation selected: {operation_name.replace('_', ' ').title()}"
-        )
+        if set_default:
+            self.config_manager.set_value(self.LAST_OPERATION_CONFIG_KEY, operation_name)
+        # self._log_to_console(
+        #     f"Operation selected: {operation_name.replace('_', ' ').title()}"
+        # )
         self._update_operation_options_panel(operation_name)
         self._update_status_bar(
             f"Selected operation: {operation_name.replace('_', ' ').title()}"
@@ -620,7 +747,7 @@ class FirestarterApp(tk.Tk):
         # FR-007: Execute Button
         self.execute_button = ttk.Button(
             self.options_panel_frame,
-            text=f"Run {operation_name.replace('_', ' ').title()}",
+            text=f"{operation_name.replace('_', ' ').title()}",
             command=self._on_execute_operation,
         )
         self.execute_button.pack(pady=10)
@@ -635,7 +762,7 @@ class FirestarterApp(tk.Tk):
         if not self.current_operation_panel:
             messagebox.showerror("Error", "Operation panel not initialized.")
             return
-        
+
         device_port = self.selected_device.get()
         if device_port == "None":
             messagebox.showerror("Error", "No programmer device selected.")
@@ -645,23 +772,31 @@ class FirestarterApp(tk.Tk):
 
         # Check if EPROM is required for the current operation
         eprom_required_ops = [
-            "read", "write", "verify", "erase", "check_id", "blank_check"
+            "read",
+            "write",
+            "verify",
+            "erase",
+            "check_id",
+            "blank_check",
         ]
         if self.current_operation in eprom_required_ops and eprom_name == "None":
             messagebox.showerror(
-                "Error", f"No EPROM selected. Please select an EPROM for the '{self.current_operation}' operation."
+                "Error",
+                f"No EPROM selected. Please select an EPROM for the '{self.current_operation}' operation.",
             )
             if hasattr(self, "execute_button") and self.execute_button:
                 self.execute_button.config(state=tk.NORMAL)
             return
 
-        if device_port == "None": # This check is now redundant due to the one above, but harmless if kept.
+        if (
+            device_port == "None"
+        ):  # This check is now redundant due to the one above, but harmless if kept.
             messagebox.showerror("Error", "No programmer device selected.")
             if hasattr(self, "execute_button") and self.execute_button:
                 self.execute_button.config(state=tk.NORMAL)
             return
 
-        eprom_data_for_op = None
+        eprom_data = None
 
         if eprom_name != "None":
             full_eprom_data = self.db.get_eprom(eprom_name)
@@ -671,7 +806,7 @@ class FirestarterApp(tk.Tk):
                 )
                 return
             try:
-                eprom_data_for_op = self.db.convert_to_programmer(
+                eprom_data = self.db.convert_to_programmer(
                     full_eprom_data
                 )  # Use firestarter_ops.db
             except Exception as e_conv:
@@ -684,7 +819,7 @@ class FirestarterApp(tk.Tk):
                 if hasattr(self, "execute_button") and self.execute_button:
                     self.execute_button.config(state=tk.NORMAL)
                 return
-            if not eprom_data_for_op:
+            if not eprom_data:
                 messagebox.showerror(
                     "Error", f"Failed to prepare EPROM data for '{eprom_name}'."
                 )
@@ -706,7 +841,7 @@ class FirestarterApp(tk.Tk):
 
             # Delegate to the current operation panel
             operation_initiated = self.current_operation_panel.execute_operation(
-                eprom_name, eprom_data_for_op
+                eprom_name, eprom_data
             )
 
             if not operation_initiated:
