@@ -92,7 +92,7 @@ class FirestarterOperations:
                 )
                 self.ui_queue.put(("result", (operation_name, result)))
                 self.ui_queue.put(
-                    ("status", f"{operation_name} completed successfully or did it.")
+self.ui_queue.put(("status", f"{operation_name} completed successfully."))
                 )
             except (
                 EpromOperationError,
