@@ -3,6 +3,15 @@ on:
   push:
     branches:
     - main
+    paths-ignore:
+    - '**.md'
+    - '**.sh'
+    - '.gitignore'
+    - 'docs/**'
+    - 'images/**'
+    - '.github/**'
+    - '.vscode/**'
+    - 'tools/**'
 
 jobs:
   github:
