@@ -6,7 +6,7 @@
 [![PyPI version](https://badge.fury.io/py/firestarter-ui.svg)](https://badge.fury.io/py/firestarter-ui)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/E1E21I2WWW)
+[![ko-fi](https://raw.githubusercontent.com/henols/firestarter_app/refs/heads/main/images/ko-fi.png)](https://ko-fi.com/E1E21I2WWW)
 
 ----
 A simple, cross-platform, graphical user interface for the [Firestarter EPROM programmer library](https://github.com/henols/firestarter).
