@@ -1,1 +1,2 @@
 firestarter>=2.0.0
+pillow>=6.2.2

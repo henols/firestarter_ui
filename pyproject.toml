@@ -49,12 +49,15 @@ classifiers = [
 ]
 
 dependencies = [
-    "firestarter>=2.0.2"
+    "firestarter>=2.0.2","pillow>=6.2.2"
 ]
 urls = { "Homepage" = "https://github.com/henols/firestarter_ui" }
 
-[project.scripts]
+[project.gui-scripts]
 firestarter-ui = "firestarter_ui.main_app:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "firestarter_ui.__version__"}
+
+[tool.setuptools.package-data]
+"firestarter_ui" = ["icons/logo_icon.png","icons/read.png","icons/write.png","icons/erase.png","icons/verify.png","icons/erase.png","icons/check_id.png"]

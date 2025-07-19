@@ -13,6 +13,14 @@ import os  # Added for path operations
 from pathlib import Path  # Added for path operations
 from queue import Queue
 
+# Try to import Pillow for toolbar icons, but don't make it a hard requirement.
+try:
+    from PIL import Image, ImageTk
+
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
 from firestarter import __version__ as firestarter_version
 from firestarter_ui import __version__ as ui_version
 
@@ -103,6 +111,101 @@ class PreferencesDialog(tk.Toplevel):
         self.config_manager.set_value("debug_logging", self.debug_logging.get())
         self.destroy()
 
+
+class AboutDialog(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.transient(parent)
+        self.title("About Firestarter UI")
+        self.resizable(False, False)
+
+        self.logo_photo = None  # To prevent garbage collection
+
+        main_frame = ttk.Frame(self, padding="20")
+        main_frame.pack(expand=True, fill=tk.BOTH)
+
+        # Logo
+        if PIL_AVAILABLE:
+            try:
+                # Assumes an 'images' directory is located alongside the ui_manager.py file
+                
+                logo_path = Path(__file__).parent / "icons" / "logo_icon.png"
+                if logo_path.exists():
+                    img = Image.open(logo_path)
+                    img.thumbnail((128, 128))  # Resize for the dialog
+                    self.logo_photo = ImageTk.PhotoImage(img)
+                    logo_label = ttk.Label(main_frame, image=self.logo_photo)
+                    logo_label.pack(pady=(0, 15))
+                else:
+                    logging.warning(f"About dialog logo not found at: {logo_path}")
+            except Exception as e:
+                logging.error(f"Failed to load logo image for About dialog: {e}")
+
+        # Text information
+        ttk.Label(main_frame, text="Firestarter UI", font="-weight bold").pack()
+        ttk.Label(main_frame, text=f"Version {ui_version}").pack(pady=(0, 10))
+        ttk.Label(
+            main_frame, text=f"Using Firestarter Library v{firestarter_version}"
+        ).pack()
+
+        # Separator and Button
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
+        ok_button = ttk.Button(main_frame, text="OK", command=self.destroy)
+        ok_button.pack()
+        ok_button.focus_set()
+
+        self.bind("<Return>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+        # Make modal
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.grab_set()
+        self.wait_window(self)
+
+
+class AboutProgrammerDialog(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.transient(parent)
+        self.title("About Programmer")
+        self.resizable(False, False)
+
+        self.hw_version_var = tk.StringVar(value="Probing...")
+        self.fw_version_var = tk.StringVar(value="Probing...")
+
+        main_frame = ttk.Frame(self, padding="20")
+        main_frame.pack(expand=True, fill=tk.BOTH)
+
+        # Hardware Version
+        hw_frame = ttk.Frame(main_frame)
+        hw_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(hw_frame, text="Hardware Version:", font="-weight bold").pack(
+            side=tk.LEFT, anchor=tk.W
+        )
+        ttk.Label(hw_frame, textvariable=self.hw_version_var).pack(side=tk.LEFT, padx=5)
+
+        # Firmware Version
+        fw_frame = ttk.Frame(main_frame)
+        fw_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(fw_frame, text="Firmware Version:", font="-weight bold").pack(
+            side=tk.LEFT, anchor=tk.W
+        )
+        ttk.Label(fw_frame, textvariable=self.fw_version_var).pack(side=tk.LEFT, padx=5)
+
+        # Separator and Button
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
+        ok_button = ttk.Button(main_frame, text="OK", command=self.destroy)
+        ok_button.pack()
+        ok_button.focus_set()
+
+        self.bind("<Return>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+    def set_hw_version(self, version_str):
+        self.hw_version_var.set(version_str)
+
+    def set_fw_version(self, version, board):
+        self.fw_version_var.set(f"{version} ({board})")
 
 class EpromSearchDialog(tk.Toplevel):
     def __init__(self, parent, all_eproms, title="Search EPROM"):
@@ -201,6 +304,66 @@ class EpromSearchDialog(tk.Toplevel):
         self.destroy()
 
 
+class Tooltip:
+    """
+    Create a tooltip for a given widget.
+    """
+
+    def __init__(self, widget, text, delay=500):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self.tooltip_window = None
+        self.id = None
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.leave)
+        self.widget.bind("<ButtonPress>", self.leave)
+
+    def enter(self, event=None):
+        self.schedule()
+
+    def leave(self, event=None):
+        self.unschedule()
+        self.hidetip()
+
+    def schedule(self):
+        self.unschedule()
+        self.id = self.widget.after(self.delay, self.showtip)
+
+    def unschedule(self):
+        id = self.id
+        self.id = None
+        if id:
+            self.widget.after_cancel(id)
+
+    def showtip(self, event=None):
+        # Get coordinates of the widget
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 1
+
+        self.tooltip_window = tw = tk.Toplevel(self.widget)
+        # Removes the window frame
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(
+            tw,
+            text=self.text,
+            justify=tk.LEFT,
+            background="#ffffe0",
+            relief=tk.SOLID,
+            borderwidth=1,
+            font=("tahoma", "8", "normal"),
+        )
+        label.pack(ipadx=1)
+
+    def hidetip(self):
+        tw = self.tooltip_window
+        self.tooltip_window = None
+        if tw:
+            tw.destroy()
+
+
 class FirestarterApp(tk.Tk):
     """
     Main application class for the Firestarter UI.
@@ -217,6 +380,7 @@ class FirestarterApp(tk.Tk):
         self.LAST_OPERATION_CONFIG_KEY = "last_operation"
         # Initialize FirestarterOperations and ConfigManager early to use for geometry
         self.db = EpromDatabase()  # Initialize EpromDatabase instance (db)
+        self.active_about_programmer_dialog = None
 
         self.ui_queue = Queue()
 
@@ -401,7 +565,9 @@ class FirestarterApp(tk.Tk):
         self.programmer_menu.add_command(
             label="Update Programmer Firmware...", state=tk.DISABLED
         )
-        self.programmer_menu.add_command(label="About Programmer...", state=tk.DISABLED)
+        self.programmer_menu.add_command(
+            label="About Programmer...", command=self._on_about_programmer
+        )
         menubar.add_cascade(label="Programmer", menu=self.programmer_menu)
 
         # Help Menu
@@ -414,11 +580,52 @@ class FirestarterApp(tk.Tk):
         # FR-002: Toolbar (Optional quick access)
         self.toolbar = ttk.Frame(self, padding="2")
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
-        # Example: ttk.Button(self.toolbar, text="Read", command=lambda: self._select_operation("read")).pack(side=tk.LEFT)
-        # For now, keeping it minimal as per "can be hidden"
-        ttk.Label(
-            self.toolbar, text="Toolbar (placeholder for icons/quick actions)"
-        ).pack(side=tk.LEFT)
+        self.toolbar_icons = {}  # To prevent garbage collection
+
+        if not PIL_AVAILABLE:
+            logging.warning(
+                "Pillow library not found (pip install Pillow). Toolbar icons will not be displayed."
+            )
+            return
+
+        # Assumes an 'icons' directory is located alongside the ui_manager.py file
+        icon_path = Path(__file__).parent / "icons"
+        if not icon_path.is_dir():
+            logging.warning(f"Icons directory not found at: {icon_path}")
+            return
+
+        operations = {
+            "read": "read.png",
+            "write": "write.png",
+            "verify": "verify.png",
+            "erase": "erase.png",
+            "blank_check": "blank_check.png",
+            "check_id": "check_id.png",
+        }
+
+        for op_name, icon_file in operations.items():
+            try:
+                full_icon_path = icon_path / icon_file
+                if not full_icon_path.exists():
+                    logging.warning(f"Icon file not found: {full_icon_path}")
+                    continue
+
+                img = Image.open(full_icon_path)
+                img.thumbnail((48, 48))  # Resize for toolbar
+                photo_img = ImageTk.PhotoImage(img)
+                self.toolbar_icons[op_name] = photo_img  # Keep reference
+
+                btn = ttk.Button(
+                    self.toolbar,
+                    image=photo_img,
+                    command=lambda op=op_name: self._select_operation(op),
+                )
+                tooltip_text = op_name.replace("_", " ").title()
+                Tooltip(btn, text=tooltip_text)
+                btn.pack(side=tk.LEFT, padx=2, pady=2)
+
+            except Exception as e:
+                logging.error(f"Failed to load icon for '{op_name}': {e}")
 
     def _create_device_eprom_selection_area(self):
         # FR-004, FR-005
@@ -515,6 +722,23 @@ class FirestarterApp(tk.Tk):
                     self._log_to_console(data, "INFO")
                     self._update_status_bar(data)
                 elif msg_type == "error":
+                    # Check if the error is from one of our dialog's operations
+                    if self.active_about_programmer_dialog:
+                        if "GetHardwareVersion failed:" in data:
+                            error_msg = data.split(":", 1)[1].strip()
+                            self.active_about_programmer_dialog.set_hw_version(
+                                f"Error: {error_msg}"
+                            )
+                            self._log_to_console(data, "ERROR")
+                            continue  # Skip generic messagebox
+                        elif "GetFirmwareVersion failed:" in data:
+                            error_msg = data.split(":", 1)[1].strip()
+                            self.active_about_programmer_dialog.set_fw_version(
+                                f"Error: {error_msg}", ""
+                            )
+                            self._log_to_console(data, "ERROR")
+                            continue  # Skip generic messagebox
+
                     self._log_to_console(data, "ERROR")
                     messagebox.showerror("Operation Error", data)
                     self._update_status_bar(f"Error: {data[:50]}...")
@@ -536,6 +760,17 @@ class FirestarterApp(tk.Tk):
                     # Handle specific results, e.g., device list
                     if op_name == "Detect Devices":
                         self._populate_device_menu(op_result)
+                    elif op_name == "GetHardwareVersion":
+                        if self.active_about_programmer_dialog:
+                            self.active_about_programmer_dialog.set_hw_version(
+                                op_result
+                            )
+                    elif op_name == "GetFirmwareVersion":
+                        if self.active_about_programmer_dialog:
+                            version, board = op_result
+                            self.active_about_programmer_dialog.set_fw_version(
+                                version, board
+                            )
                 elif msg_type == "eprom_list" or msg_type == "eprom_search_results":
                     if isinstance(data, list) and (
                         not data or data[0] != "Error: DB not loaded"
@@ -563,8 +798,14 @@ class FirestarterApp(tk.Tk):
                     if not type == "DATA":
                         self._log_to_console(msg, type)
                 elif msg_type == "operation_finished":
+                    op_name = data
+                    # If the HW version check for the About Programmer dialog just finished,
+                    # start the FW version check.
+                    if op_name == "GetHardwareVersion" and self.active_about_programmer_dialog:
+                        self.firestarter_ops.get_firmware_version()
+
                     # Re-enable UI elements if they were disabled
-                    self._update_status_bar(f"{data} finished. Ready.")
+                    self._update_status_bar(f"{op_name} finished. Ready.")
                     if hasattr(self, "execute_button") and self.execute_button:
                         self.execute_button.config(state=tk.NORMAL)
                     if self.progress_bar.winfo_ismapped():
@@ -659,12 +900,24 @@ class FirestarterApp(tk.Tk):
         ):  # Refresh options panel if a device is selected/changed
             self._update_operation_options_panel(self.current_operation)
 
+    def _on_about_programmer(self):
+        if self.active_about_programmer_dialog:
+            self.active_about_programmer_dialog.lift()
+            return
+
+        dialog = AboutProgrammerDialog(self)
+        self.active_about_programmer_dialog = dialog
+        dialog.bind("<Destroy>", lambda e: self._on_about_programmer_closed())
+
+        self.firestarter_ops.get_hardware_version()
+        dialog.grab_set()
+
+    def _on_about_programmer_closed(self):
+        self.active_about_programmer_dialog = None
+        logging.debug("AboutProgrammerDialog closed and reference cleared.")
+
     def _on_about(self):
-        messagebox.showinfo(
-            "About Firestarter UI",
-            f"Firestarter UI\nVersion {ui_version}\n\n"
-            f"Firestarter programmer library (v{firestarter_version}).",
-        )
+        AboutDialog(self)
 
     def _open_preferences(self):
         dialog = PreferencesDialog(self, self.config_manager)

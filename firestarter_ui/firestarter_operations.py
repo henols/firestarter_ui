@@ -16,12 +16,13 @@ from firestarter.eprom_operations import (
     EpromOperationError,
     build_flags as fs_build_flags,
 )
-from firestarter.hardware import HardwareManager, HardwareOperationError
+from firestarter.hardware import HardwareManager, HardwareOperationError, SerialCommunicator
 from firestarter.firmware import FirmwareManager, FirmwareOperationError
 from firestarter.config import ConfigManager
 from firestarter.main import allowed_eproms as fs_allowed_eproms  # For EPROM list
 from firestarter.constants import (
     FLAG_FORCE,
+    COMMAND_HW_VERSION,
     FLAG_SKIP_BLANK_CHECK,
     FLAG_SKIP_ERASE,
     FLAG_VPE_AS_VPP,
@@ -93,7 +94,7 @@ class FirestarterOperations:
                 )
                 self.ui_queue.put(("result", (operation_name, result)))
                 self.ui_queue.put(
-self.ui_queue.put(("status", f"{operation_name} completed successfully."))
+                self.ui_queue.put(("status", f"{operation_name} completed successfully."))
                 )
             except (
                 EpromOperationError,
@@ -368,3 +369,56 @@ self.ui_queue.put(("status", f"{operation_name} completed successfully."))
             flags,
             operation_name="Erase",
         )
+
+    def get_hardware_version(self):
+        """Probes the programmer for its hardware version."""
+        logging.debug("get_hardware_version called.")
+        if not self.hardware_manager:
+            logging.warning("get_hardware_version: HardwareManager not available.")
+            self.ui_queue.put(
+                ("error", "GetHardwareVersion failed: HardwareManager not available.")
+            )
+            return
+
+        def _get_hw():
+            # This logic is similar to what HardwareManager.get_hardware_revision does,
+            # but we want to return the value, not just log it.
+            comm = None
+            try:
+                command_dict = {"state": COMMAND_HW_VERSION}
+                comm = SerialCommunicator.find_and_connect(
+                    command_dict, self.config_manager
+                )
+                is_ok, msg = comm.expect_ack()
+                if is_ok:
+                    return msg
+                else:
+                    raise HardwareOperationError(f"Failed to get hardware version: {msg}")
+            finally:
+                if comm:
+                    comm.disconnect()
+
+        self._execute_in_thread(_get_hw, operation_name="GetHardwareVersion")
+
+    def get_firmware_version(self):
+        """Probes the programmer for its firmware version and board type."""
+        logging.debug("get_firmware_version called.")
+        if not self.firmware_manager:
+            logging.warning("get_firmware_version: FirmwareManager not available.")
+            self.ui_queue.put(
+                ("error", "GetFirmwareVersion failed: FirmwareManager not available.")
+            )
+            return
+
+        def _get_fw():
+            # firmware_manager.check_current_firmware returns a tuple (port, version, board)
+            port, version, board = self.firmware_manager.check_current_firmware()
+            if version and board:
+                return (version, board)
+            else:
+                # The method already logs errors, but we should raise to be caught by _execute_in_thread
+                raise FirmwareOperationError(
+                    "Could not retrieve firmware version. Is a programmer connected?"
+                )
+
+        self._execute_in_thread(_get_fw, operation_name="GetFirmwareVersion")

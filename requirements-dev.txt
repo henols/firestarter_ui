@@ -1,1 +1,2 @@
 ../firestarter_app/
+pillow>=6.2.2
