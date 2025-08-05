@@ -110,7 +110,9 @@ system_requires = [
 ]
 
 system_runtime_requires = [
-    # Add any system packages needed at runtime here
+    # Use flexible Python version requirement
+    "python3 (>= 3.9)",
+    "python3-tk",
 ]
 
 [tool.briefcase.app.firestarter-ui.linux.system.rhel]
